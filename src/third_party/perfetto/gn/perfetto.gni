@@ -102,8 +102,9 @@ declare_args() {
 # This can be overridden by embedders (e.g. v8) in their .gn(i) files. This must
 # be different from the GN args flag (is_perfetto_embedder) because of the way
 # GN works.
+# Force embedder mode for naive/cronet builds.
 if (!defined(perfetto_build_with_embedder)) {
-  perfetto_build_with_embedder = build_with_chromium || is_perfetto_embedder
+  perfetto_build_with_embedder = true
 }
 
 # Controls whether the `libperfetto` target bundles the JSON export code in its

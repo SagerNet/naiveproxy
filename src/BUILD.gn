@@ -52,6 +52,7 @@ group("gn_all") {
 
   deps = [
     "//net",
+    "//components/cronet:cronet_static",
   ]
 }
 
