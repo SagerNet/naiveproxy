@@ -8,8 +8,8 @@ import("//build/config/cronet/config.gni")
 # For details see declare_args() in build/config/BUILDCONFIG.gn.
 declare_args() {
   # Enables the use of ICU alternatives in lieu of ICU for the target toolchain.
-  # Cronet relies on this to reduce its binary size.
-  use_platform_icu_alternatives = is_cronet_build
+  # The flag is used for Cronet to reduce the size of the Cronet binary.
+  use_platform_icu_alternatives = true
 }
 
 # Never use platform icu for host toolchain.
