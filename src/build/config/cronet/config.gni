@@ -6,7 +6,8 @@ declare_args() {
   # Control whether cronet is built (this is usually set by the script
   # components/cronet/tools/cr_cronet.py as cronet requires specific
   # gn args to build correctly).
-  is_cronet_build = false
+  # Enabled for naive/cronet-go builds.
+  is_cronet_build = true
 
   # Controls whether cronet is currently being built for AOSP or Chromium.
   # This will always be false when building Cronet for Chromium.
