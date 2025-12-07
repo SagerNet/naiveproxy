@@ -2,7 +2,11 @@ src/chrome/android/profiles/afdo.prof
 src/chrome/build/pgo_profiles/
 src/gn/
 src/third_party/llvm-build/
+src/third_party/llvm-build-linux/
 src/third_party/android_toolchain/
+src/build/linux/debian_bullseye_amd64-sysroot/
+src/build/linux/debian_bullseye_arm64-sysroot/
 src/out/
 .vscode/
+.idea/
 *.pyc
