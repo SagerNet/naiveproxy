@@ -180,6 +180,14 @@ struct URLRequestContextConfig {
 
   const std::optional<cronet::proto::ProxyOptions> proxy_options;
 
+  // Custom TCP dialer callback. When set, this callback will be used to
+  // establish TCP connections instead of the default socket API.
+  // The callback takes (context, address, port) and returns:
+  //   - On success: connected socket fd (>= 0)
+  //   - On failure: negative net error code
+  int (*dialer)(void*, const char*, uint16_t) = nullptr;
+  void* dialer_context = nullptr;
+
   static bool ExperimentalOptionsParsingIsAllowedToFail() {
     return DCHECK_IS_ON();
   }
