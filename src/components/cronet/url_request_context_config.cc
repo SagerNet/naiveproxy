@@ -39,6 +39,7 @@
 #include "net/log/net_log.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/quic/set_quic_flag.h"
+#include "net/socket/custom_client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
@@ -963,6 +964,20 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
 
   if (mock_cert_verifier)
     context_builder->SetCertVerifier(std::move(mock_cert_verifier));
+
+  // Set custom TCP dialer if provided.
+  if (dialer) {
+    auto dialer_copy = dialer;
+    auto context_copy = dialer_context;
+    auto custom_factory = std::make_unique<net::CustomClientSocketFactory>(
+        base::BindRepeating(
+            [](int (*dialer)(void*, const char*, uint16_t), void* context,
+               const std::string& address, uint16_t port) -> int {
+              return dialer(context, address.c_str(), port);
+            },
+            dialer_copy, context_copy));
+    context_builder->set_client_socket_factory(std::move(custom_factory));
+  }
   // TODO(mef): Use |config| to set cookies.
 }
 
