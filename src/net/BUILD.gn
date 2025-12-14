@@ -941,6 +941,8 @@ component("net") {
     "shared_dictionary/shared_dictionary_network_transaction_factory.h",
     "socket/client_socket_factory.cc",
     "socket/client_socket_factory.h",
+    "socket/custom_client_socket_factory.cc",
+    "socket/custom_client_socket_factory.h",
     "socket/client_socket_handle.cc",
     "socket/client_socket_handle.h",
     "socket/client_socket_pool.cc",
