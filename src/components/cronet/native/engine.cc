@@ -176,6 +176,14 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
 
+  // Set custom dialer if provided.
+  if (dialer_) {
+    config->dialer = dialer_;
+    config->dialer_context = dialer_context_;
+    dialer_ = nullptr;
+    dialer_context_ = nullptr;
+  }
+
   for (const auto& public_key_pins : params->public_key_pins) {
     auto pkp = std::make_unique<URLRequestContextConfig::Pkp>(
         public_key_pins.host, public_key_pins.include_subdomains,
@@ -495,6 +503,13 @@ void Cronet_EngineImpl::SetMockCertVerifierForTesting(
   mock_cert_verifier_ = std::move(mock_cert_verifier);
 }
 
+void Cronet_EngineImpl::SetDialer(int (*dialer)(void*, const char*, uint16_t),
+                                  void* context) {
+  CHECK(!context_);
+  dialer_ = dialer;
+  dialer_context_ = context;
+}
+
 stream_engine* Cronet_EngineImpl::GetBidirectionalStreamEngine() {
   init_completed_.Wait();
   return stream_engine_.get();
@@ -521,6 +536,14 @@ CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
   return engine_impl->GetBidirectionalStreamEngine();
+}
+
+CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
+                                           Cronet_DialerFunc dialer,
+                                           void* context) {
+  cronet::Cronet_EngineImpl* engine_impl =
+      static_cast<cronet::Cronet_EngineImpl*>(engine);
+  engine_impl->SetDialer(dialer, context);
 }
 
 namespace {

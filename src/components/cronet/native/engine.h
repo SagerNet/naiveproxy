@@ -58,6 +58,10 @@ class Cronet_EngineImpl : public Cronet_Engine {
   void SetMockCertVerifierForTesting(
       std::unique_ptr<net::CertVerifier> mock_cert_verifier);
 
+  // Set custom dialer for TCP connections. Must be called before
+  // StartWithParams.
+  void SetDialer(int (*dialer)(void*, const char*, uint16_t), void* context);
+
   // Get stream engine for GRPC Bidirectional Stream support. The returned
   // stream_engine is owned by |this| and is only valid until |this| shutdown.
   stream_engine* GetBidirectionalStreamEngine();
@@ -103,6 +107,10 @@ class Cronet_EngineImpl : public Cronet_Engine {
 
   // Mock CertVerifier for testing. Only valid until StartWithParams.
   std::unique_ptr<net::CertVerifier> mock_cert_verifier_;
+
+  // Custom dialer for TCP connections. Only valid until StartWithParams.
+  int (*dialer_)(void*, const char*, uint16_t) = nullptr;
+  void* dialer_context_ = nullptr;
 
   // Stores registered RequestFinishedInfoListeners with their associated
   // Executors.

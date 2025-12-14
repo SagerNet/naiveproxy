@@ -40,6 +40,31 @@ CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
 CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
     const char* pem_root_certs);
 
+// Dialer callback type for custom TCP connection establishment.
+// context: User-provided context pointer passed to Cronet_Engine_SetDialer.
+// address: IP address string (e.g. "1.2.3.4" or "::1").
+// port: Port number.
+// Returns: connected socket fd on success, negative net error code on failure.
+// Common error codes:
+//   -102: ERR_CONNECTION_REFUSED
+//   -104: ERR_CONNECTION_FAILED
+//   -109: ERR_ADDRESS_UNREACHABLE
+//   -118: ERR_CONNECTION_TIMED_OUT
+typedef int (*Cronet_DialerFunc)(void* context,
+                                 const char* address,
+                                 uint16_t port);
+
+// Sets a custom dialer for TCP connections.
+// When set, the engine will use this callback to establish TCP connections
+// instead of the default system socket API.
+// Must be called before Cronet_Engine_StartWithParams().
+// dialer: The callback function to use for TCP connections, or nullptr to
+//         disable custom dialing.
+// context: User-provided context pointer that will be passed to the dialer.
+CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
+                                           Cronet_DialerFunc dialer,
+                                           void* context);
+
 #ifdef __cplusplus
 }
 #endif
