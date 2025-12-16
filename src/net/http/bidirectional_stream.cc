@@ -212,6 +212,9 @@ void BidirectionalStream::StartRequest() {
     net::SchemefulSite site(GURL{*network_isolation_key_header});
     CHECK(!site.opaque());
     http_request_info.network_isolation_key = NetworkIsolationKey(site, site);
+    http_request_info.network_anonymization_key =
+        NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
+            http_request_info.network_isolation_key);
   }
   http_request_info.extra_headers = request_info_->extra_headers;
   http_request_info.socket_tag = request_info_->socket_tag;
