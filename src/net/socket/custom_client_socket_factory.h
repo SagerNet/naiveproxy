@@ -28,7 +28,25 @@ class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
   using DialerCallback =
       base::RepeatingCallback<int(const std::string& address, uint16_t port)>;
 
-  explicit CustomClientSocketFactory(DialerCallback dialer);
+  // Callback type for custom UDP dialer.
+  // Parameters:
+  //   - address: IP address string (e.g. "1.2.3.4" or "::1")
+  //   - port: Port number
+  //   - out_local_address: Output buffer for local IP (caller provides buffer)
+  //   - out_local_port: Output pointer for local port
+  // Returns:
+  //   - On success: socket file descriptor (>= 0)
+  //   - On failure: negative net error code
+  // The returned socket can be AF_INET/AF_INET6 SOCK_DGRAM, AF_UNIX SOCK_DGRAM,
+  // or AF_UNIX SOCK_STREAM (for Windows, with length-prefix framing).
+  using UdpDialerCallback = base::RepeatingCallback<int(
+      const std::string& address,
+      uint16_t port,
+      char* out_local_address,
+      uint16_t* out_local_port)>;
+
+  CustomClientSocketFactory(DialerCallback tcp_dialer,
+                            UdpDialerCallback udp_dialer);
   ~CustomClientSocketFactory() override;
 
   CustomClientSocketFactory(const CustomClientSocketFactory&) = delete;
@@ -55,7 +73,8 @@ class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
       const SSLConfig& ssl_config) override;
 
  private:
-  DialerCallback dialer_;
+  DialerCallback tcp_dialer_;
+  UdpDialerCallback udp_dialer_;
 };
 
 }  // namespace net
