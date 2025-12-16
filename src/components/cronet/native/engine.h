@@ -62,6 +62,11 @@ class Cronet_EngineImpl : public Cronet_Engine {
   // StartWithParams.
   void SetDialer(int (*dialer)(void*, const char*, uint16_t), void* context);
 
+  // Set custom dialer for UDP sockets. Must be called before StartWithParams.
+  void SetUdpDialer(
+      int (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+      void* context);
+
   // Get stream engine for GRPC Bidirectional Stream support. The returned
   // stream_engine is owned by |this| and is only valid until |this| shutdown.
   stream_engine* GetBidirectionalStreamEngine();
@@ -111,6 +116,10 @@ class Cronet_EngineImpl : public Cronet_Engine {
   // Custom dialer for TCP connections. Only valid until StartWithParams.
   int (*dialer_)(void*, const char*, uint16_t) = nullptr;
   void* dialer_context_ = nullptr;
+
+  // Custom dialer for UDP sockets. Only valid until StartWithParams.
+  int (*udp_dialer_)(void*, const char*, uint16_t, char*, uint16_t*) = nullptr;
+  void* udp_dialer_context_ = nullptr;
 
   // Stores registered RequestFinishedInfoListeners with their associated
   // Executors.

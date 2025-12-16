@@ -312,6 +312,14 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
     dialer_context_ = nullptr;
   }
 
+  // Set custom UDP dialer if provided.
+  if (udp_dialer_) {
+    config->udp_dialer = udp_dialer_;
+    config->udp_dialer_context = udp_dialer_context_;
+    udp_dialer_ = nullptr;
+    udp_dialer_context_ = nullptr;
+  }
+
   for (const auto& public_key_pins : params->public_key_pins) {
     auto pkp = std::make_unique<URLRequestContextConfig::Pkp>(
         public_key_pins.host, public_key_pins.include_subdomains,
@@ -511,6 +519,14 @@ void Cronet_EngineImpl::SetDialer(int (*dialer)(void*, const char*, uint16_t),
   dialer_context_ = context;
 }
 
+void Cronet_EngineImpl::SetUdpDialer(
+    int (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+    void* context) {
+  CHECK(!context_);
+  udp_dialer_ = dialer;
+  udp_dialer_context_ = context;
+}
+
 stream_engine* Cronet_EngineImpl::GetBidirectionalStreamEngine() {
   init_completed_.Wait();
   return stream_engine_.get();
@@ -545,6 +561,14 @@ CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
   engine_impl->SetDialer(dialer, context);
+}
+
+CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
+                                              Cronet_UdpDialerFunc dialer,
+                                              void* context) {
+  cronet::Cronet_EngineImpl* engine_impl =
+      static_cast<cronet::Cronet_EngineImpl*>(engine);
+  engine_impl->SetUdpDialer(dialer, context);
 }
 
 namespace {
