@@ -967,17 +967,37 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
   if (mock_cert_verifier)
     context_builder->SetCertVerifier(std::move(mock_cert_verifier));
 
-  // Set custom TCP dialer if provided.
-  if (dialer) {
-    auto dialer_copy = dialer;
-    auto context_copy = dialer_context;
+  // Set custom dialers if provided.
+  if (dialer || udp_dialer) {
+    net::CustomClientSocketFactory::DialerCallback tcp_dialer_callback;
+    net::CustomClientSocketFactory::UdpDialerCallback udp_dialer_callback;
+
+    if (dialer) {
+      auto dialer_copy = dialer;
+      auto context_copy = dialer_context;
+      tcp_dialer_callback = base::BindRepeating(
+          [](int (*dialer)(void*, const char*, uint16_t), void* context,
+             const std::string& address, uint16_t port) -> int {
+            return dialer(context, address.c_str(), port);
+          },
+          dialer_copy, context_copy);
+    }
+
+    if (udp_dialer) {
+      auto udp_dialer_copy = udp_dialer;
+      auto udp_context_copy = udp_dialer_context;
+      udp_dialer_callback = base::BindRepeating(
+          [](int (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+             void* context, const std::string& address, uint16_t port,
+             char* out_local_address, uint16_t* out_local_port) -> int {
+            return dialer(context, address.c_str(), port, out_local_address,
+                          out_local_port);
+          },
+          udp_dialer_copy, udp_context_copy);
+    }
+
     auto custom_factory = std::make_unique<net::CustomClientSocketFactory>(
-        base::BindRepeating(
-            [](int (*dialer)(void*, const char*, uint16_t), void* context,
-               const std::string& address, uint16_t port) -> int {
-              return dialer(context, address.c_str(), port);
-            },
-            dialer_copy, context_copy));
+        std::move(tcp_dialer_callback), std::move(udp_dialer_callback));
     context_builder->set_client_socket_factory(std::move(custom_factory));
   }
   // TODO(mef): Use |config| to set cookies.

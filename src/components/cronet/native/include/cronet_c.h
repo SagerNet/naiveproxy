@@ -65,6 +65,35 @@ CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
                                            Cronet_DialerFunc dialer,
                                            void* context);
 
+// UDP Dialer callback type for custom UDP socket creation.
+// context: User-provided context pointer passed to Cronet_Engine_SetUdpDialer.
+// address: IP address string (e.g. "1.2.3.4" or "::1").
+// port: Port number.
+// out_local_address: Output buffer for local IP address (caller provides buffer,
+//                    should be at least 46 bytes for INET6_ADDRSTRLEN).
+// out_local_port: Output pointer for local port number.
+// Returns: socket fd on success, negative net error code on failure.
+// The returned socket can be:
+//   - AF_INET/AF_INET6 SOCK_DGRAM: Standard UDP socket
+//   - AF_UNIX SOCK_DGRAM: Unix domain datagram socket (Unix/macOS/Linux)
+//   - AF_UNIX SOCK_STREAM: Unix domain stream socket (Windows, with framing)
+typedef int (*Cronet_UdpDialerFunc)(void* context,
+                                    const char* address,
+                                    uint16_t port,
+                                    char* out_local_address,
+                                    uint16_t* out_local_port);
+
+// Sets a custom dialer for UDP sockets.
+// When set, the engine will use this callback to create UDP sockets
+// instead of the default system socket API.
+// Must be called before Cronet_Engine_StartWithParams().
+// dialer: The callback function to use for UDP sockets, or nullptr to
+//         disable custom UDP dialing.
+// context: User-provided context pointer that will be passed to the dialer.
+CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
+                                              Cronet_UdpDialerFunc dialer,
+                                              void* context);
+
 #ifdef __cplusplus
 }
 #endif
