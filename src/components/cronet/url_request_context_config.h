@@ -189,6 +189,15 @@ struct URLRequestContextConfig {
   int (*dialer)(void*, const char*, uint16_t) = nullptr;
   void* dialer_context = nullptr;
 
+  // Custom UDP dialer callback. When set, this callback will be used to
+  // create UDP sockets instead of the default socket API.
+  // The callback takes (context, address, port, out_local_address, out_local_port)
+  // and returns:
+  //   - On success: socket fd (>= 0)
+  //   - On failure: negative net error code
+  int (*udp_dialer)(void*, const char*, uint16_t, char*, uint16_t*) = nullptr;
+  void* udp_dialer_context = nullptr;
+
   static bool ExperimentalOptionsParsingIsAllowedToFail() {
     return DCHECK_IS_ON();
   }
