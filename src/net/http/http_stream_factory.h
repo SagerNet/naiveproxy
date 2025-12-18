@@ -107,6 +107,9 @@ class NET_EXPORT HttpStreamFactory {
     SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow;
     SocketTag socket_tag;
     handles::NetworkHandle target_network = handles::kInvalidNetworkHandle;
+
+    // When true, force this request to use QUIC without TCP/HTTP fallback.
+    bool force_quic = false;
   };
 
   // Calculates an appropriate SPDY session key for the given parameters.
