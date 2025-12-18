@@ -216,6 +216,11 @@ void BidirectionalStream::StartRequest() {
         NetworkAnonymizationKey::CreateFromNetworkIsolationKey(
             http_request_info.network_isolation_key);
   }
+  if (auto force_quic_header =
+          request_info_->extra_headers.GetHeader("-force-quic")) {
+    request_info_->extra_headers.RemoveHeader("-force-quic");
+    http_request_info.force_quic = (*force_quic_header == "true");
+  }
   http_request_info.extra_headers = request_info_->extra_headers;
   http_request_info.socket_tag = request_info_->socket_tag;
   stream_request_ =

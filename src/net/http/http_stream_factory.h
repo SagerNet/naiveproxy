@@ -105,6 +105,9 @@ class NET_EXPORT HttpStreamFactory {
     PrivacyMode privacy_mode = PRIVACY_MODE_DISABLED;
     SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow;
     SocketTag socket_tag;
+
+    // When true, force this request to use QUIC without TCP/HTTP fallback.
+    bool force_quic = false;
   };
 
   // Calculates an appropriate SPDY session key for the given parameters.
