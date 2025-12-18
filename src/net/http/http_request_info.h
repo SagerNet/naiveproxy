@@ -142,6 +142,9 @@ struct NET_EXPORT HttpRequestInfo {
 
   // True if the request is for a pervasive, shared third-party resource.
   bool is_shared_resource = false;
+
+  // When true, force this request to use QUIC without TCP/HTTP fallback.
+  bool force_quic = false;
 };
 
 }  // namespace net
