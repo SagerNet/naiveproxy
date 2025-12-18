@@ -142,6 +142,9 @@ struct NET_EXPORT HttpRequestInfo {
 
   // True if the page is allowed to access cookies for the request.
   bool is_shared_resource = false;
+
+  // When true, force this request to use QUIC without TCP/HTTP fallback.
+  bool force_quic = false;
 };
 
 }  // namespace net

@@ -141,6 +141,7 @@ HttpStreamFactory::Job::Job(
       using_quic_(
           alternative_protocol == NextProto::kProtoQUIC ||
           session->ShouldForceQuic(destination_, proxy_info, is_websocket_) ||
+          request_info.force_quic ||
           job_type == DNS_ALPN_H3 || job_type == PRECONNECT_DNS_ALPN_H3),
       quic_version_(quic_version),
       expect_spdy_(alternative_protocol == NextProto::kProtoHTTP2 &&
@@ -166,7 +167,8 @@ HttpStreamFactory::Job::Job(
   // The Job is forced to use QUIC without a designated version, try the
   // preferred QUIC version that is supported by default.
   if (quic_version_ == quic::ParsedQuicVersion::Unsupported() &&
-      session->ShouldForceQuic(destination_, proxy_info, is_websocket_)) {
+      (session->ShouldForceQuic(destination_, proxy_info, is_websocket_) ||
+       request_info.force_quic)) {
     quic_version_ =
         session->context().quic_context->params()->supported_versions[0];
   }
