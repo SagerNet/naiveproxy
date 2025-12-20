@@ -148,6 +148,14 @@ if (false) {
       sources = [
         "cronet_global_state_stubs.cc",
       ]
+
+      # On Linux, use version script to limit exported symbols to public API only.
+      # This reduces symbol pollution and binary size.
+      if (is_linux) {
+        inputs = [ "cronet_exports.lst" ]
+        ldflags =
+            [ "-Wl,--version-script=" + rebase_path("cronet_exports.lst") ]
+      }
     }
   }
 }
