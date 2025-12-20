@@ -4,76 +4,132 @@
 
 #include "base/android/android_info.h"
 
-#include <string>
+#include <cstdlib>
 
-static constexpr std::string empty;
+#include "base/no_destructor.h"
 
-namespace base::android::android_info {
-void Set(const IAndroidInfo& info) {
+int __system_property_get(const char* name, char* value);
+
+namespace {
+
+constexpr int kPropValueMax = 92;
+
+std::string GetSystemProperty(const char* name) {
+  char value[kPropValueMax];
+  if (__system_property_get(name, value) > 0) {
+    return std::string(value);
+  }
+  return std::string();
 }
 
-const std::string& device() {
-  return empty;
-}
-
-const std::string& manufacturer() {
-  return empty;
-}
-
-const std::string& model() {
-  return empty;
-}
-
-const std::string& brand() {
-  return empty;
-}
-
-const std::string& android_build_id() {
-  return empty;
-}
-
-const std::string& build_type() {
-  return empty;
-}
-
-const std::string& board() {
-  return empty;
-}
-
-const std::string& android_build_fp() {
-  return empty;
-}
-
-int sdk_int() {
+int GetSdkInt() {
+  char value[kPropValueMax];
+  if (__system_property_get("ro.build.version.sdk", value) > 0) {
+    return std::atoi(value);
+  }
   return 0;
 }
 
+}  // namespace
+
+namespace base::android::android_info {
+
+const std::string& device() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.device"));
+  return *s;
+}
+
+const std::string& manufacturer() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.manufacturer"));
+  return *s;
+}
+
+const std::string& model() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.model"));
+  return *s;
+}
+
+const std::string& brand() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.brand"));
+  return *s;
+}
+
+const std::string& android_build_id() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.id"));
+  return *s;
+}
+
+const std::string& build_type() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.type"));
+  return *s;
+}
+
+const std::string& board() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.board"));
+  return *s;
+}
+
+const std::string& android_build_fp() {
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.fingerprint"));
+  return *s;
+}
+
+int sdk_int() {
+  static const int sdk = GetSdkInt();
+  return sdk;
+}
+
 bool is_debug_android() {
-  return false;
+  static const bool debug = GetSystemProperty("ro.debuggable") == "1";
+  return debug;
 }
 
 const std::string& version_incremental() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.version.incremental"));
+  return *s;
 }
 
 const std::string& hardware() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.hardware"));
+  return *s;
 }
 
 const std::string& codename() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.version.codename"));
+  return *s;
 }
 
 const std::string& soc_manufacturer() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.soc.manufacturer"));
+  return *s;
 }
 
 const std::string& abi_name() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.product.cpu.abi"));
+  return *s;
 }
 
 const std::string& security_patch() {
-  return empty;
+  static const base::NoDestructor<std::string> s(
+      GetSystemProperty("ro.build.version.security_patch"));
+  return *s;
+}
+
+void Set(const IAndroidInfo& info) {
+  // No-op in stub - values are read from system properties
 }
 
 }  // namespace base::android::android_info
