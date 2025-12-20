@@ -32,7 +32,10 @@ scoped_refptr<base::SingleThreadTaskRunner> InitializeAndCreateTaskRunner() {
 
   // Initialize CommandLine - required by many Chromium components
   // (e.g., TrustStoreChrome uses CommandLine::HasSwitch)
-  base::CommandLine::Init(0, nullptr);
+  // Use defensive check to avoid double initialization if host app already initialized it.
+  if (!base::CommandLine::InitializedForCurrentProcess()) {
+    base::CommandLine::Init(0, nullptr);
+  }
 
   // Enable PartitionConnectionsByNetworkIsolationKey for -network-isolation-key
   // header support in BidirectionalStream.

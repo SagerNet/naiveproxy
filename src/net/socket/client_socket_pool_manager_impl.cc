@@ -83,15 +83,12 @@ ClientSocketPool* ClientSocketPoolManagerImpl::GetSocketPool(
         sockets_per_proxy_chain, sockets_per_group, proxy_chain,
         &websocket_common_connect_job_params_);
   } else {
-    // NOTE(cronet-go): The original Chromium code passed `/*force_tunnel=*/true`
-    // here, but this parameter is actually `is_for_websockets`. When true, it
-    // forces ALPN to HTTP/1.1 only, which breaks HTTP/2 BidirectionalStream.
-    // We set it to false to allow HTTP/2 ALPN negotiation.
     new_pool = std::make_unique<TransportClientSocketPool>(
         sockets_per_proxy_chain, sockets_per_group,
         unused_idle_socket_timeout(pool_type_), proxy_chain,
-        /*is_for_websockets=*/false, &common_connect_job_params_,
-        cleanup_on_ip_address_change_);
+        /*is_for_websockets=*/pool_type_ ==
+            HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+        &common_connect_job_params_, cleanup_on_ip_address_change_);
   }
 
   std::pair<SocketPoolMap::iterator, bool> ret =
