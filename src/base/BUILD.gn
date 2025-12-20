@@ -1957,8 +1957,17 @@ component("base") {
       "Security.framework",
     ]
 
-    if (!is_ios || !use_blink) {
+    # tvOS doesn't have mach_msg available, so use POSIX implementation
+    if (!is_ios || (!use_blink && target_platform != "tvos")) {
       sources += [ "synchronization/waitable_event_apple.cc" ]
+    }
+
+    # tvOS needs POSIX waitable_event when not using blink
+    if (is_ios && !use_blink && target_platform == "tvos") {
+      sources += [
+        "synchronization/waitable_event_posix.cc",
+        "synchronization/waitable_event_watcher_posix.cc",
+      ]
     }
   }
 
@@ -2141,8 +2150,13 @@ component("base") {
         sources += [ "process/launch_ios.cc" ]
       }
     } else {
+      # tvOS doesn't support power_monitor_device_source_ios.mm
+      if (target_platform == "tvos") {
+        sources += [ "power_monitor/power_monitor_device_source_stub.cc" ]
+      } else {
+        sources += [ "power_monitor/power_monitor_device_source_ios.mm" ]
+      }
       sources += [
-        "power_monitor/power_monitor_device_source_ios.mm",
         "process/launch_ios.cc",
         "process/memory_stubs.cc",
         "process/process_stubs.cc",
