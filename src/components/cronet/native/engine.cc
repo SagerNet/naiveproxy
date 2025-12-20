@@ -25,7 +25,20 @@
 #include "components/cronet/version.h"
 #include "components/grpc_support/include/bidirectional_stream_c.h"
 #include "net/base/hash_value.h"
+#include "net/cert/cert_verify_proc.h"
+#include "net/cert/cert_verify_proc_builtin.h"
+#include "net/cert/crl_set.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/do_nothing_ct_verifier.h"
+#include "net/cert/internal/system_trust_store.h"
+#include "net/cert/multi_threaded_cert_verifier.h"
+#include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/url_request/url_request_context.h"
+#include "third_party/boringssl/src/pki/cert_errors.h"
+#include "third_party/boringssl/src/pki/parse_certificate.h"
+#include "third_party/boringssl/src/pki/parsed_certificate.h"
+#include "third_party/boringssl/src/pki/trust_store_in_memory.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -508,4 +521,133 @@ CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
   return engine_impl->GetBidirectionalStreamEngine();
+}
+
+namespace {
+
+// A simple SystemTrustStore that only uses custom root certificates.
+class CustomRootSystemTrustStore : public net::SystemTrustStore {
+ public:
+  explicit CustomRootSystemTrustStore(
+      std::unique_ptr<bssl::TrustStoreInMemory> trust_store)
+      : trust_store_(std::move(trust_store)) {}
+
+  bssl::TrustStore* GetTrustStore() override { return trust_store_.get(); }
+
+  bool IsKnownRoot(const bssl::ParsedCertificate* cert) const override {
+    return trust_store_->Contains(cert);
+  }
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  net::PlatformTrustStore* GetPlatformTrustStore() override { return nullptr; }
+
+  bool IsLocallyTrustedRoot(
+      const bssl::ParsedCertificate* trust_anchor) override {
+    return false;
+  }
+
+  int64_t chrome_root_store_version() const override { return 0; }
+
+  base::span<const net::ChromeRootCertConstraints> GetChromeRootConstraints(
+      const bssl::ParsedCertificate* cert) const override {
+    return {};
+  }
+
+  bssl::TrustStore* eutl_trust_store() override { return nullptr; }
+#endif
+
+ private:
+  std::unique_ptr<bssl::TrustStoreInMemory> trust_store_;
+};
+
+// A CertVerifyProcFactory that always returns the same fixed CertVerifyProc.
+class FixedCertVerifyProcFactory : public net::CertVerifyProcFactory {
+ public:
+  explicit FixedCertVerifyProcFactory(
+      scoped_refptr<net::CertVerifyProc> verify_proc)
+      : verify_proc_(std::move(verify_proc)) {}
+
+  scoped_refptr<net::CertVerifyProc> CreateCertVerifyProc(
+      scoped_refptr<net::CertNetFetcher> cert_net_fetcher,
+      const net::CertVerifyProc::ImplParams& impl_params,
+      const net::CertVerifyProc::InstanceParams& instance_params) override {
+    return verify_proc_;
+  }
+
+ protected:
+  ~FixedCertVerifyProcFactory() override = default;
+
+ private:
+  scoped_refptr<net::CertVerifyProc> verify_proc_;
+};
+
+}  // namespace
+
+CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
+    const char* pem_root_certs) {
+  cronet::EnsureInitialized();
+
+  if (!pem_root_certs || strlen(pem_root_certs) == 0) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: PEM data is empty";
+    return nullptr;
+  }
+
+  // Parse PEM certificates
+  size_t pem_len = strlen(pem_root_certs);
+  net::CertificateList certs = net::X509Certificate::CreateCertificateListFromBytes(
+      base::as_byte_span(std::string_view(pem_root_certs, pem_len)),
+      net::X509Certificate::FORMAT_AUTO);
+
+  if (certs.empty()) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid certificates found in PEM data";
+    return nullptr;
+  }
+
+  // Create a TrustStoreInMemory with the parsed certificates
+  auto trust_store = std::make_unique<bssl::TrustStoreInMemory>();
+
+  for (const auto& cert : certs) {
+    bssl::CertErrors errors;
+    auto parsed = bssl::ParsedCertificate::Create(
+        bssl::UpRef(cert->cert_buffer()),
+        net::x509_util::DefaultParseCertificateOptions(), &errors);
+    if (!parsed) {
+      LOG(WARNING) << "CreateCertVerifierWithRootCerts: Failed to parse certificate: "
+                   << errors.ToDebugString();
+      continue;
+    }
+    trust_store->AddTrustAnchor(std::move(parsed));
+  }
+
+  if (trust_store->IsEmpty()) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid trust anchors could be parsed";
+    return nullptr;
+  }
+
+  // Create the SystemTrustStore with only custom roots
+  auto system_trust_store =
+      std::make_unique<CustomRootSystemTrustStore>(std::move(trust_store));
+
+  auto crl_set = net::CRLSet::BuiltinCRLSet();
+
+  // Create the CertVerifyProc with default settings and custom trust store
+  net::CertVerifyProc::InstanceParams instance_params;
+  scoped_refptr<net::CertVerifyProc> verify_proc = net::CreateCertVerifyProcBuiltin(
+      /*net_fetcher=*/nullptr,
+      std::move(crl_set),
+      std::make_unique<net::DoNothingCTVerifier>(),
+      base::MakeRefCounted<net::DefaultCTPolicyEnforcer>(),
+      std::move(system_trust_store),
+      instance_params,
+      /*time_tracker=*/std::nullopt);
+
+  // Create a factory that returns the same CertVerifyProc
+  auto verify_proc_factory =
+      base::MakeRefCounted<FixedCertVerifyProcFactory>(verify_proc);
+
+  // Create the MultiThreadedCertVerifier with both verify_proc and factory
+  auto* verifier = new net::MultiThreadedCertVerifier(
+      std::move(verify_proc), std::move(verify_proc_factory));
+
+  return verifier;
 }
