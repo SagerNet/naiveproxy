@@ -31,6 +31,15 @@ CRONET_EXPORT void Cronet_Engine_SetMockCertVerifierForTesting(
 CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
     Cronet_EnginePtr engine);
 
+// Creates a CertVerifier that uses custom root certificates for validation.
+// pem_root_certs: PEM-formatted root certificates (can contain multiple certs).
+// Returns a pointer to the created net::CertVerifier.
+// The caller is responsible for passing it to
+// Cronet_Engine_SetMockCertVerifierForTesting() which takes ownership.
+// Returns nullptr if the PEM data is invalid or no valid certificates found.
+CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
+    const char* pem_root_certs);
+
 #ifdef __cplusplus
 }
 #endif
