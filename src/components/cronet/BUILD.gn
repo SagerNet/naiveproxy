@@ -124,4 +124,30 @@ if (false) {
       "//components/cronet/native:cronet_native_headers",
     ]
   }
+
+  # Shared library for Windows and Linux (purego mode).
+  # On Windows, Go's CGO cannot link MSVC-compiled static libraries,
+  # so we provide a DLL for runtime loading via purego + memmod.
+  # On Linux, shared library is provided for purego mode and release distribution.
+  if (is_win || is_linux) {
+    shared_library("cronet") {
+      deps = [
+        "//base",
+        "//components/cronet:cronet_common",
+        "//components/cronet/native:cronet_native_impl",
+        "//components/grpc_support",
+        "//net",
+      ]
+
+      if (use_custom_libcxx) {
+        deps += [
+          "//build/config:shared_library_deps",
+        ]
+      }
+
+      sources = [
+        "cronet_global_state_stubs.cc",
+      ]
+    }
+  }
 }

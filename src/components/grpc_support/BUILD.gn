@@ -6,20 +6,44 @@ source_set("headers") {
   public = [ "include/bidirectional_stream_c.h" ]
 }
 
-static_library("grpc_support") {
-  sources = [
-    "bidirectional_stream.cc",
-    "bidirectional_stream.h",
-    "bidirectional_stream_c.cc",
-  ]
+# On Windows, use source_set so that __declspec(dllexport) attributes
+# in bidirectional_stream_c.h are honored when building the DLL.
+# Static libraries don't export symbols from their object files when
+# linked into a DLL - the dllexport attribute is ignored.
+if (is_win) {
+  source_set("grpc_support") {
+    sources = [
+      "bidirectional_stream.cc",
+      "bidirectional_stream.h",
+      "bidirectional_stream_c.cc",
+    ]
 
-  public = [ "include/bidirectional_stream_c.h" ]
+    public = [ "include/bidirectional_stream_c.h" ]
 
-  public_deps = [ ":headers" ]
+    public_deps = [ ":headers" ]
 
-  deps = [
-    "//base",
-    "//net",
-    "//url",
-  ]
+    deps = [
+      "//base",
+      "//net",
+      "//url",
+    ]
+  }
+} else {
+  static_library("grpc_support") {
+    sources = [
+      "bidirectional_stream.cc",
+      "bidirectional_stream.h",
+      "bidirectional_stream_c.cc",
+    ]
+
+    public = [ "include/bidirectional_stream_c.h" ]
+
+    public_deps = [ ":headers" ]
+
+    deps = [
+      "//base",
+      "//net",
+      "//url",
+    ]
+  }
 }
