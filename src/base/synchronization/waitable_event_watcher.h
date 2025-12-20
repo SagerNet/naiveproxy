@@ -120,7 +120,8 @@ class BASE_EXPORT WaitableEventWatcher
 
   EventCallback callback_;
   raw_ptr<WaitableEvent, AcrossTasksDanglingUntriaged> event_ = nullptr;
-#elif BUILDFLAG(IS_APPLE) && (!BUILDFLAG(IS_IOS) || !BUILDFLAG(USE_BLINK))
+#elif BUILDFLAG(IS_APPLE) && \
+    (!BUILDFLAG(IS_IOS) || (!BUILDFLAG(USE_BLINK) && !BUILDFLAG(IS_IOS_TVOS)))
   // Invokes the callback and resets the source. Must be called on the task
   // runner on which StartWatching() was called.
   void InvokeCallback();
