@@ -23,6 +23,8 @@
 #include "build/build_config.h"
 #include "components/cronet/cronet_proxy_delegate.h"
 #include "net/base/address_family.h"
+#include "net/base/ip_address.h"
+#include "net/base/url_util.h"
 #include "net/cert/caching_cert_verifier.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
@@ -30,6 +32,8 @@
 #include "net/dns/context_host_resolver.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
+#include "net/dns/public/dns_over_https_config.h"
+#include "net/dns/public/secure_dns_mode.h"
 #include "net/dns/stale_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
@@ -177,6 +181,11 @@ const char kStaleDnsUseStaleOnNameNotResolved[] =
 // See explanation of format in net/dns/mapped_host_resolver.h.
 const char kHostResolverRulesFieldTrialName[] = "HostResolverRules";
 const char kHostResolverRules[] = "host_resolver_rules";
+
+// DnsServerOverride experiment dictionary name.
+const char kDnsServerOverrideFieldTrialName[] = "DnsServerOverride";
+// Name of list of nameservers to use for DNS resolution.
+const char kDnsServerOverrideNameservers[] = "nameservers";
 
 // NetworkQualityEstimator (NQE) experiment dictionary name.
 const char kNetworkQualityEstimatorFieldTrialName[] = "NetworkQualityEstimator";
@@ -433,10 +442,12 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
   bool async_dns_enable = false;
   bool stale_dns_enable = false;
   bool host_resolver_rules_enable = false;
+  bool dns_server_override_enable = false;
   bool disable_ipv6_on_wifi = false;
   bool nel_enable = false;
   bool is_network_bound = bound_network != net::handles::kInvalidNetworkHandle;
   std::optional<net::HostResolver::HttpsSvcbOptions> https_svcb_options;
+  std::vector<net::IPEndPoint> dns_server_override_nameservers;
 
   net::StaleHostResolver::StaleOptions stale_dns_options;
   // TODO(crbug.com/399372859): Run an experiment to use the default
@@ -683,6 +694,40 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       host_resolver_rules_string =
           host_resolver_rules_args.FindString(kHostResolverRules);
       host_resolver_rules_enable = !!host_resolver_rules_string;
+    } else if (iter->first == kDnsServerOverrideFieldTrialName) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::Value::Dict& dns_server_args = iter->second.GetDict();
+      const base::Value::List* nameservers_list =
+          dns_server_args.FindList(kDnsServerOverrideNameservers);
+      if (nameservers_list) {
+        for (const auto& nameserver : *nameservers_list) {
+          if (!nameserver.is_string())
+            continue;
+          std::string host;
+          int port;
+          if (!net::ParseHostAndPort(nameserver.GetString(), &host, &port)) {
+            LOG(WARNING) << "Invalid nameserver address: "
+                         << nameserver.GetString();
+            continue;
+          }
+          if (port == -1) {
+            port = 53;  // Default DNS port
+          }
+          std::optional<net::IPAddress> ip_address =
+              net::IPAddress::FromIPLiteral(host);
+          if (!ip_address) {
+            LOG(WARNING) << "Invalid nameserver IP address: " << host;
+            continue;
+          }
+          dns_server_override_nameservers.emplace_back(*ip_address, port);
+        }
+        dns_server_override_enable = !dns_server_override_nameservers.empty();
+      }
     } else if (iter->first == kUseDnsHttpsSvcbFieldTrialName) {
       if (!iter->second.is_dict()) {
         LOG(ERROR) << "\"" << iter->first << "\" config params \""
@@ -802,13 +847,29 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
   }
 
   if (async_dns_enable || stale_dns_enable || host_resolver_rules_enable ||
-      disable_ipv6_on_wifi || is_network_bound || https_svcb_options) {
+      dns_server_override_enable || disable_ipv6_on_wifi || is_network_bound ||
+      https_svcb_options) {
     net::HostResolver::ManagerOptions host_resolver_manager_options;
     host_resolver_manager_options.insecure_dns_client_enabled =
         async_dns_enable;
     host_resolver_manager_options.check_ipv6_on_wifi = !disable_ipv6_on_wifi;
     if (https_svcb_options) {
       host_resolver_manager_options.https_svcb_options = https_svcb_options;
+    }
+    if (dns_server_override_enable) {
+      // Use CreateOverridingEverythingWithDefaults to completely ignore system DNS config
+      host_resolver_manager_options.dns_config_overrides =
+          net::DnsConfigOverrides::CreateOverridingEverythingWithDefaults();
+      // Override with our custom nameservers
+      host_resolver_manager_options.dns_config_overrides.nameservers =
+          dns_server_override_nameservers;
+      // Fully disable Secure DNS (DoH) to force using the configured nameservers
+      host_resolver_manager_options.dns_config_overrides.secure_dns_mode =
+          net::SecureDnsMode::kOff;
+      host_resolver_manager_options.dns_config_overrides.allow_dns_over_https_upgrade =
+          false;
+      host_resolver_manager_options.dns_config_overrides.dns_over_https_config =
+          net::DnsOverHttpsConfig();  // Empty config, no DoH servers
     }
 
     if (!is_network_bound) {
