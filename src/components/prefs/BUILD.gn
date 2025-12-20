@@ -58,4 +58,14 @@ component("prefs") {
 
   deps = []
   public_deps = [ "//base" ]
+
+  # Android JNI support disabled for cronet-go (native only)
+  # Original JNI files require generated headers from Java.
+  # Using stub implementations instead.
+  if (is_android) {
+    sources += [
+      "android/pref_service_android.h",
+      "android/pref_service_android_stub.cc",
+    ]
+  }
 }

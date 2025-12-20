@@ -1133,6 +1133,14 @@ component("base") {
       "android/build_info_stub.cc",
       "android/content_uri_utils.h",
       "android/content_uri_utils_stub.cc",
+      "android/path_utils.h",
+      "android/path_utils_stub.cc",
+      "android/input_hint_checker.h",
+      "android/input_hint_checker_stub.cc",
+      "android/android_info.h",
+      "android/android_info_stub.cc",
+      "android/java_runtime.h",
+      "android/java_runtime_stub.cc",
       "android/virtual_document_path.cc",
       "android/virtual_document_path.h",
       "android/yield_to_looper_checker.cc",
@@ -1161,6 +1169,10 @@ component("base") {
       "process/process_metrics_linux.cc",
       "system/sys_info_linux.cc",
       "threading/platform_thread_metrics_linux.cc",
+
+      # Android-specific shared memory implementation.
+      "memory/platform_shared_memory_mapper_android.cc",
+      "memory/platform_shared_memory_region_android.cc",
     ]
 
     deps += [
