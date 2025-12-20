@@ -1306,6 +1306,7 @@ component("net") {
       "android/http_auth_negotiate_android.h",
       "android/keystore.h",
       "android/network_change_notifier_android.h",
+      "android/network_change_notifier_android_stub.cc",
       "android/network_change_notifier_delegate_android.h",
       "android/network_change_notifier_factory_android.h",
       "android/network_library_stub.cc",
@@ -1313,6 +1314,7 @@ component("net") {
       "android/traffic_stats.h",
       "cert/cert_verify_proc_android.h",
       "proxy_resolution/proxy_config_service_android.h",
+      "proxy_resolution/proxy_config_service_android_stub.cc",
     ]
   }
 
