@@ -186,9 +186,11 @@ class BASE_EXPORT WaitableEvent {
 
 #if BUILDFLAG(IS_WIN)
   win::ScopedHandle handle_;
-#elif BUILDFLAG(IS_APPLE) && (!BUILDFLAG(IS_IOS) || !BUILDFLAG(USE_BLINK))
+#elif BUILDFLAG(IS_APPLE) && \
+    (!BUILDFLAG(IS_IOS) || (!BUILDFLAG(USE_BLINK) && !BUILDFLAG(IS_IOS_TVOS)))
   // iOS which supports blink must use the posix variant since opening
-  // mach_ports is prevented inside sandbox profiles.
+  // mach_ports is prevented inside sandbox profiles. tvOS doesn't have
+  // mach_msg available, so it always uses the POSIX variant.
   //
   // Peeks the message queue named by |port| and returns true if a message
   // is present and false if not. If |dequeue| is true, the messsage will be
