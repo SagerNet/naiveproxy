@@ -1192,6 +1192,11 @@ component("base") {
       "memory/platform_shared_memory_region_android.cc",
     ]
 
+    sources += [
+      "android/linker/ashmem.cc",
+      "android/linker/ashmem.h",
+    ]
+
     deps += [
       "//third_party/cpu_features:ndk_compat",
     ]
