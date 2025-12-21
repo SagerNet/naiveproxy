@@ -3,12 +3,24 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
+import("//build/config/c++/c++.gni")
 import("//build/toolchain/toolchain.gni")
 import("//build/util/lastchange.gni")
 import("//build/util/process_version.gni")
 import("//chrome/version.gni")
-import("//testing/test.gni")
+import("//components/cronet/native/include/headers.gni")
+import("//components/grpc_support/include/headers.gni")
 import("//third_party/protobuf/proto_library.gni")
+
+declare_args() {
+  # If set to true, this will remove histogram manager to reduce binary size.
+  disable_histogram_support = true
+}
+
+buildflag_header("cronet_buildflags") {
+  header = "cronet_buildflags.h"
+  flags = [ "DISABLE_HISTOGRAM_SUPPORT=$disable_histogram_support" ]
+}
 
 process_version("cronet_version_header") {
   template_file = "//components/cronet/version.h.in"
@@ -22,15 +34,6 @@ process_version("cronet_version_header") {
 
 proto_library("request_context_config_proto") {
   sources = [ "proto/request_context_config.proto" ]
-}
-
-if (is_android) {
-  import("//build/config/android/rules.gni")
-
-  proto_java_library("request_context_config_java_proto") {
-    proto_path = "."
-    sources = [ "proto/request_context_config.proto" ]
-  }
 }
 
 # Cronet common implementation.
@@ -53,6 +56,7 @@ source_set("cronet_common") {
     "url_request_context_config.h",
   ]
   deps = [
+    ":cronet_buildflags",
     ":cronet_version_header",
     ":metrics_util",
     ":request_context_config_proto",
@@ -61,7 +65,9 @@ source_set("cronet_common") {
     "//net",
   ]
 
-  public_deps = [ "//components/metrics:library_support" ]
+  if (!disable_histogram_support) {
+    public_deps = [ "//components/metrics:library_support" ]
+  }
 }
 
 source_set("metrics_util") {
@@ -75,27 +81,86 @@ source_set("metrics_util") {
   ]
 }
 
-# Unit tests for Cronet common implementation.
-source_set("cronet_common_unittests") {
-  testonly = true
-
-  deps = [
-    ":cronet_common",
-    "//components/prefs:test_support",
-    "//net:test_support",
-  ]
-
-  sources = [
-    "cronet_stale_host_resolver_unittest.cc",
-    "host_cache_persistence_manager_unittest.cc",
-    "network_tasks_unittest.cc",
-    "url_request_context_config_unittest.cc",
-  ]
-}
-
-if (is_android) {
+# For platforms on which the native Cronet library is used, build the library.
+# Android and iOS have their own platform-specific rules to build Cronet.
+# (Modified for cronet-go: always build cronet_static for all platforms)
+if (false) {
   group("cronet_package") {
     testonly = true
     deps = [ "//components/cronet/android:cronet_package_android" ]
+  }
+} else {
+  static_library("cronet_static") {
+    deps = [
+      "//base",
+      "//components/cronet:cronet_common",
+      "//components/cronet/native:cronet_native_impl",
+      "//components/grpc_support",
+      "//net",
+    ]
+
+    if (use_custom_libcxx) {
+      deps += [
+        "//build/config:shared_library_deps",
+      ]
+    }
+
+    sources = [
+      "cronet_global_state_stubs.cc",
+    ]
+
+    complete_static_lib = true
+    configs -= [ "//build/config/compiler:thin_archive" ]
+  }
+
+  # Sample executable that links against cronet_static.
+  # Used to extract linking parameters from the generated ninja file.
+  executable("cronet_sample") {
+    testonly = true
+    sources = [
+      "native/sample/main.cc",
+      "native/sample/sample_executor.cc",
+      "native/sample/sample_executor.h",
+      "native/sample/sample_url_request_callback.cc",
+      "native/sample/sample_url_request_callback.h",
+    ]
+    deps = [
+      ":cronet_static",
+      "//components/cronet/native:cronet_native_headers",
+    ]
+  }
+
+  # Shared library for Windows and Linux (purego mode).
+  # On Windows, Go's CGO cannot link MSVC-compiled static libraries,
+  # so we provide a DLL for runtime loading via purego + memmod.
+  # On Linux, shared library is provided for purego mode and release distribution.
+  if (is_win || is_linux) {
+    shared_library("cronet") {
+      deps = [
+        "//base",
+        "//components/cronet:cronet_common",
+        "//components/cronet/native:cronet_native_impl",
+        "//components/grpc_support",
+        "//net",
+      ]
+
+      if (use_custom_libcxx) {
+        deps += [
+          "//build/config:shared_library_deps",
+        ]
+      }
+
+      sources = [
+        "cronet_global_state_stubs.cc",
+      ]
+
+      # On Linux, use version script to limit exported symbols to public API only.
+      # This reduces symbol pollution and binary size.
+      if (is_linux) {
+        inputs = [ "cronet_exports.lst" ]
+        ldflags =
+            [ "-Wl,--version-script=" + rebase_path("cronet_exports.lst") ]
+      }
+    }
   }
 }
