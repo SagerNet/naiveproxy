@@ -367,24 +367,10 @@ CronetContext::NetworkTasks::BuildDefaultURLRequestContext(
   context_config_->ConfigureURLRequestContextBuilder(&context_builder, this);
   SetSharedURLRequestContextBuilderConfig(&context_builder);
 
-  // Use fixed proxy configuration from experimental_options instead of
-  // system proxy. This avoids creating background resources that can't be
-  // cleaned up.
-  const base::Value* proxy_server =
-      context_config_->effective_experimental_options.Find("proxy_server");
-  std::string proxy_server_str = "direct://";
-  if (proxy_server != nullptr && proxy_server->is_string()) {
-    proxy_server_str = proxy_server->GetString();
-  }
-  net::ProxyConfig proxy_config;
-  proxy_config.proxy_rules().ParseFromString(proxy_server_str);
-  auto proxy_service =
-      net::ConfiguredProxyResolutionService::CreateWithoutProxyResolver(
-          std::make_unique<net::ProxyConfigServiceFixed>(
-              net::ProxyConfigWithAnnotation(proxy_config,
-                                             MISSING_TRAFFIC_ANNOTATION)),
-          GetNetLog().net_log());
-  context_builder.set_proxy_resolution_service(std::move(proxy_service));
+  // Use direct connection (no proxy). This avoids creating background
+  // resources from system proxy monitoring that can't be cleaned up.
+  context_builder.set_proxy_resolution_service(
+      net::ConfiguredProxyResolutionService::CreateDirect());
 
   if (context_config_->enable_network_quality_estimator) {
     std::unique_ptr<net::NetworkQualityEstimatorParams> nqe_params =
