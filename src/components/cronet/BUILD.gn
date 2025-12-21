@@ -3,14 +3,23 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
+import("//build/config/c++/c++.gni")
 import("//build/toolchain/toolchain.gni")
 import("//build/util/lastchange.gni")
 import("//build/util/process_version.gni")
-import("//chrome/version.gni")
 import("//components/cronet/native/include/headers.gni")
 import("//components/grpc_support/include/headers.gni")
-import("//testing/test.gni")
 import("//third_party/protobuf/proto_library.gni")
+
+declare_args() {
+  # If set to true, this will remove histogram manager to reduce binary size.
+  disable_histogram_support = true
+}
+
+buildflag_header("cronet_buildflags") {
+  header = "cronet_buildflags.h"
+  flags = [ "DISABLE_HISTOGRAM_SUPPORT=$disable_histogram_support" ]
+}
 
 process_version("cronet_version_header") {
   template_file = "//components/cronet/version.h.in"
@@ -24,15 +33,6 @@ process_version("cronet_version_header") {
 
 proto_library("request_context_config_proto") {
   sources = [ "proto/request_context_config.proto" ]
-}
-
-if (is_android) {
-  import("//build/config/android/rules.gni")
-
-  proto_java_library("request_context_config_java_proto") {
-    proto_path = "."
-    sources = [ "proto/request_context_config.proto" ]
-  }
 }
 
 # Cronet common implementation.
@@ -55,6 +55,7 @@ source_set("cronet_common") {
     "url_request_context_config.h",
   ]
   deps = [
+    ":cronet_buildflags",
     ":cronet_version_header",
     ":metrics_util",
     ":request_context_config_proto",
@@ -63,7 +64,9 @@ source_set("cronet_common") {
     "//net",
   ]
 
-  public_deps = [ "//components/metrics:library_support" ]
+  if (!disable_histogram_support) {
+    public_deps = [ "//components/metrics:library_support" ]
+  }
 }
 
 source_set("metrics_util") {
@@ -77,149 +80,40 @@ source_set("metrics_util") {
   ]
 }
 
-# Unit tests for Cronet common implementation.
-source_set("cronet_common_unittests") {
-  testonly = true
-
-  deps = [
-    ":cronet_common",
-    "//components/prefs:test_support",
-    "//net:test_support",
-  ]
-
-  sources = [
-    "cronet_stale_host_resolver_unittest.cc",
-    "host_cache_persistence_manager_unittest.cc",
-    "network_tasks_unittest.cc",
-    "url_request_context_config_unittest.cc",
-  ]
-}
-
-# For platforms on which the native Cronet library is used, build the library,
-# a cronet_tests binary that exercises it, and a unit-tests binary.
-if (is_android) {
+# For platforms on which the native Cronet library is used, build the library.
+# Android and iOS have their own platform-specific rules to build Cronet.
+# (Modified for cronet-go: always build cronet_static for all platforms)
+if (false) {
   group("cronet_package") {
     testonly = true
     deps = [ "//components/cronet/android:cronet_package_android" ]
   }
 } else {
-  _cronet_shared_lib_name = "cronet.$chrome_version_full"
-  _cronet_shared_lib_file_name =
-      "$shlib_prefix$_cronet_shared_lib_name$shlib_extension"
-
-  shared_library("cronet") {
-    output_name = _cronet_shared_lib_name
-
+  static_library("cronet_static") {
     deps = [
       "//base",
       "//components/cronet:cronet_common",
       "//components/cronet/native:cronet_native_impl",
+      "//components/grpc_support",
       "//net",
     ]
 
-    sources = [ "cronet_global_state_stubs.cc" ]
-
-    # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
-    # enable the diagnostic by removing this line.
-    configs += [ "//build/config/compiler:no_exit_time_destructors" ]
-  }
-
-  test("cronet_tests") {
-    deps = [
-      ":cronet_common",
-      "//base",
-      "//base/test:test_support",
-      "//components/cronet/native:cronet_native_impl",
-      "//components/cronet/native/test:cronet_native_tests",
-      "//net",
-    ]
+    if (use_custom_libcxx) {
+      deps += [
+        "//build/config:shared_library_deps",
+      ]
+    }
 
     sources = [
       "cronet_global_state_stubs.cc",
-      "run_all_unittests.cc",
     ]
 
-    defines = [ "CRONET_TESTS_IMPLEMENTATION" ]
-
-    if ((is_linux || is_chromeos) && !is_component_build) {
-      public_configs = [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
-    }
-
-    if (is_fuchsia) {
-      additional_manifest_fragments =
-          [ "//build/config/fuchsia/test/network.shard.test-cml" ]
-    }
-
-    # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
-    # enable the diagnostic by removing this line.
-    configs += [ "//build/config/compiler:no_exit_time_destructors" ]
+    complete_static_lib = true
+    configs -= [ "//build/config/compiler:thin_archive" ]
   }
 
-  test("cronet_unittests") {
-    deps = [
-      ":cronet_common",
-      ":cronet_common_unittests",
-      "//base",
-      "//base/test:test_support",
-      "//components/cronet/native:cronet_native_unittests",
-      "//net",
-    ]
-
-    sources = [
-      "cronet_global_state_stubs.cc",
-      "run_all_unittests.cc",
-    ]
-
-    # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
-    # enable the diagnostic by removing this line.
-    configs += [ "//build/config/compiler:no_exit_time_destructors" ]
-  }
-
-  _package_dir = "$root_out_dir/cronet"
-
-  # Generate LICENSE file by recursively joining all dependent licenses.
-  action("generate_license") {
-    _license_path = "$_package_dir/LICENSE"
-
-    script = "//tools/licenses/licenses.py"
-    inputs = [ lastchange_file ]
-    outputs = [ _license_path ]
-    args = [
-      "license_file",
-      rebase_path(_license_path, root_build_dir),
-      "--gn-target",
-      "//components/cronet:cronet",
-      "--gn-out-dir",
-      ".",
-    ]
-  }
-
-  # Copy boiler-plate files into the package.
-  copy("cronet_package_copy") {
-    sources = [
-      "${root_out_dir}${shlib_subdir}/${_cronet_shared_lib_file_name}",
-      "//AUTHORS",
-      "//chrome/VERSION",
-    ]
-    deps = [ ":cronet" ]
-    outputs = [ "$_package_dir/{{source_file_part}}" ]
-  }
-
-  # Copy headers.
-  copy("cronet_package_headers") {
-    sources = cronet_native_public_headers + grpc_public_headers
-
-    outputs = [ "$_package_dir/include/{{source_file_part}}" ]
-  }
-
-  group("cronet_package") {
-    deps = [
-      ":cronet_package_copy",
-      ":cronet_package_headers",
-      ":generate_license",
-    ]
-  }
-
+  # Sample executable that links against cronet_static.
+  # Used to extract linking parameters from the generated ninja file.
   executable("cronet_sample") {
     testonly = true
     sources = [
@@ -230,23 +124,42 @@ if (is_android) {
       "native/sample/sample_url_request_callback.h",
     ]
     deps = [
-      "//components/cronet",
+      ":cronet_static",
       "//components/cronet/native:cronet_native_headers",
     ]
-    if ((is_linux || is_chromeos) && !is_component_build) {
-      public_configs = [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
-    }
   }
 
-  test("cronet_sample_test") {
-    sources = [ "native/sample/test/sample_test.cc" ]
-    deps = [
-      ":cronet_sample",
-      "//testing/gtest",
-    ]
+  # Shared library for Windows and Linux (purego mode).
+  # On Windows, Go's CGO cannot link MSVC-compiled static libraries,
+  # so we provide a DLL for runtime loading via purego + memmod.
+  # On Linux, shared library is provided for purego mode and release distribution.
+  if (is_win || is_linux) {
+    shared_library("cronet") {
+      deps = [
+        "//base",
+        "//components/cronet:cronet_common",
+        "//components/cronet/native:cronet_native_impl",
+        "//components/grpc_support",
+        "//net",
+      ]
 
-    # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
-    # enable the diagnostic by removing this line.
-    configs += [ "//build/config/compiler:no_exit_time_destructors" ]
+      if (use_custom_libcxx) {
+        deps += [
+          "//build/config:shared_library_deps",
+        ]
+      }
+
+      sources = [
+        "cronet_global_state_stubs.cc",
+      ]
+
+      # On Linux, use version script to limit exported symbols to public API only.
+      # This reduces symbol pollution and binary size.
+      if (is_linux) {
+        inputs = [ "cronet_exports.lst" ]
+        ldflags =
+            [ "-Wl,--version-script=" + rebase_path("cronet_exports.lst") ]
+      }
+    }
   }
 }

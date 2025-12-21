@@ -59,6 +59,7 @@
 #include "net/log/net_log_util.h"
 #include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator_params.h"
+#include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
@@ -368,9 +369,10 @@ CronetContext::NetworkTasks::BuildDefaultURLRequestContext(
   context_config_->ConfigureURLRequestContextBuilder(&context_builder, this);
   SetSharedURLRequestContextBuilderConfig(&context_builder);
 
+  // Use direct connection (no proxy). This avoids creating background
+  // resources from system proxy monitoring that can't be cleaned up.
   context_builder.set_proxy_resolution_service(
-      cronet::CreateProxyResolutionService(std::move(proxy_config_service),
-                                           GetNetLog().net_log()));
+      net::ConfiguredProxyResolutionService::CreateDirect());
 
   if (context_config_->enable_network_quality_estimator) {
     std::unique_ptr<net::NetworkQualityEstimatorParams> nqe_params =
