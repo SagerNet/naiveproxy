@@ -5,4 +5,6 @@ src/third_party/llvm-build/
 src/third_party/android_toolchain/
 src/out/
 .vscode/
+.idea/
+.DS_Store
 *.pyc
