@@ -33,6 +33,9 @@ declare_args() {
   # Disabled for naive/cronet builds to avoid re2 dependency.
   enable_mdns = false
 
+  # Built-in DNS client. Defaults to use_blink unless overridden.
+  enable_built_in_dns = use_blink
+
   # Reporting not used on iOS.
   enable_reporting = !is_ios
 
