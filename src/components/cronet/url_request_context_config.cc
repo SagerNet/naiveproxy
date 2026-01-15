@@ -227,6 +227,7 @@ const char kBidiStreamDetectBrokenConnection[] =
 
 const char kUseDnsHttpsSvcbFieldTrialName[] = "UseDnsHttpsSvcb";
 const char kUseDnsHttpsSvcbUseAlpn[] = "use_alpn";
+const char kUseDnsHttpsSvcbEnable[] = "enable";
 
 // Serializes a base::Value into a string that can be used as the value of
 // JFV-encoded HTTP header [1].  If |value| is a list, we remove the outermost
@@ -442,6 +443,7 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
   bool dns_server_override_enable = false;
   bool disable_ipv6_on_wifi = false;
   bool nel_enable = false;
+  bool use_dns_https_svcb_enable = true;
   bool is_network_bound = bound_network != net::handles::kInvalidNetworkHandle;
   std::optional<net::HostResolver::HttpsSvcbOptions> https_svcb_options;
   std::vector<net::IPEndPoint> dns_server_override_nameservers;
@@ -736,6 +738,14 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       session_params->use_dns_https_svcb_alpn =
           args.FindBool(kUseDnsHttpsSvcbUseAlpn)
               .value_or(session_params->use_dns_https_svcb_alpn);
+      const std::optional<bool> enable_https_svcb =
+          args.FindBool(kUseDnsHttpsSvcbEnable);
+      if (enable_https_svcb.has_value()) {
+        use_dns_https_svcb_enable = *enable_https_svcb;
+        if (!use_dns_https_svcb_enable) {
+          session_params->use_dns_https_svcb_alpn = false;
+        }
+      }
     } else if (iter->first == kNetworkErrorLoggingFieldTrialName) {
       if (!iter->second.is_dict()) {
         LOG(ERROR) << "\"" << iter->first << "\" config params \""
@@ -848,6 +858,8 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
     net::HostResolver::ManagerOptions host_resolver_manager_options;
     host_resolver_manager_options.insecure_dns_client_enabled =
         async_dns_enable;
+    host_resolver_manager_options.additional_types_via_insecure_dns_enabled =
+        use_dns_https_svcb_enable;
     host_resolver_manager_options.check_ipv6_on_wifi = !disable_ipv6_on_wifi;
     if (https_svcb_options) {
       host_resolver_manager_options.https_svcb_options = https_svcb_options;
