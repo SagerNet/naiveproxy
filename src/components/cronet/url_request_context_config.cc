@@ -40,9 +40,11 @@
 #include "net/log/net_log.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/quic/set_quic_flag.h"
+#include "net/socket/client_socket_pool_manager.h"
 #include "net/socket/custom_client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
+#include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_tag.h"
@@ -217,6 +219,9 @@ const char kDisableTlsZeroRtt[] = "disable_tls_zero_rtt";
 // network changes. When not specified, /net behavior varies depending on the
 // underlying OS.
 const char kSpdyGoAwayOnIpChange[] = "spdy_go_away_on_ip_change";
+
+const char kHTTP2Options[] = "HTTP2Options";
+const char kSocketPoolOptions[] = "SocketPoolOptions";
 
 // Whether the connection status of all bidirectional streams (created through
 // the Cronet engine) should be monitored.
@@ -821,6 +826,56 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         continue;
       }
       session_params->spdy_go_away_on_ip_change = iter->second.GetBool();
+    } else if (iter->first == kHTTP2Options) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::Value::Dict& args = iter->second.GetDict();
+      std::optional<int> session_max_recv_window_size =
+          args.FindInt("session_max_recv_window_size");
+      if (session_max_recv_window_size.has_value()) {
+        session_params->spdy_session_max_recv_window_size =
+            static_cast<size_t>(*session_max_recv_window_size);
+      }
+      std::optional<int> initial_window_size =
+          args.FindInt("initial_window_size");
+      if (initial_window_size.has_value()) {
+        session_params
+            ->http2_settings[spdy::SETTINGS_INITIAL_WINDOW_SIZE] =
+            static_cast<uint32_t>(*initial_window_size);
+      }
+    } else if (iter->first == kSocketPoolOptions) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::Value::Dict& args = iter->second.GetDict();
+      std::optional<int> max_sockets_per_pool =
+          args.FindInt("max_sockets_per_pool");
+      if (max_sockets_per_pool.has_value()) {
+        net::ClientSocketPoolManager::set_max_sockets_per_pool(
+            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            *max_sockets_per_pool);
+      }
+      std::optional<int> max_sockets_per_proxy_chain =
+          args.FindInt("max_sockets_per_proxy_chain");
+      if (max_sockets_per_proxy_chain.has_value()) {
+        net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
+            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            *max_sockets_per_proxy_chain);
+      }
+      std::optional<int> max_sockets_per_group =
+          args.FindInt("max_sockets_per_group");
+      if (max_sockets_per_group.has_value()) {
+        net::ClientSocketPoolManager::set_max_sockets_per_group(
+            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            *max_sockets_per_group);
+      }
     } else {
       LOG(WARNING) << "Unrecognized Cronet experimental option \""
                    << iter->first << "\" with params \"" << iter->second;
