@@ -41,12 +41,20 @@ class NET_EXPORT_PRIVATE ClientSocketPoolManager {
   // before any ClientSocketPoolManagerImpl is created.
   static size_t socket_soft_cap_per_pool(
       HttpNetworkSession::SocketPoolType pool_type);
+  // Compatibility setter for embedders.
+  static void set_max_sockets_per_pool(
+      HttpNetworkSession::SocketPoolType pool_type,
+      size_t socket_count);
   static void set_socket_soft_cap_per_pool_for_test(
       HttpNetworkSession::SocketPoolType pool_type,
       size_t socket_count);
 
   static size_t max_sockets_per_group(
       HttpNetworkSession::SocketPoolType pool_type);
+  // Compatibility setter for embedders.
+  static void set_max_sockets_per_group(
+      HttpNetworkSession::SocketPoolType pool_type,
+      size_t socket_count);
   static void set_max_sockets_per_group_for_test(
       HttpNetworkSession::SocketPoolType pool_type,
       size_t socket_count);

@@ -151,6 +151,13 @@ size_t ClientSocketPoolManager::socket_soft_cap_per_pool(
 }
 
 // static
+void ClientSocketPoolManager::set_max_sockets_per_pool(
+    HttpNetworkSession::SocketPoolType pool_type,
+    size_t socket_count) {
+  set_socket_soft_cap_per_pool_for_test(pool_type, socket_count);
+}
+
+// static
 void ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
     HttpNetworkSession::SocketPoolType pool_type,
     size_t socket_count) {
@@ -166,6 +173,13 @@ size_t ClientSocketPoolManager::max_sockets_per_group(
     HttpNetworkSession::SocketPoolType pool_type) {
   DCHECK_LT(pool_type, HttpNetworkSession::NUM_SOCKET_POOL_TYPES);
   return g_max_sockets_per_group[pool_type];
+}
+
+// static
+void ClientSocketPoolManager::set_max_sockets_per_group(
+    HttpNetworkSession::SocketPoolType pool_type,
+    size_t socket_count) {
+  set_max_sockets_per_group_for_test(pool_type, socket_count);
 }
 
 // static
