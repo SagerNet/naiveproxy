@@ -51,5 +51,3 @@ std::optional<std::pair<std::string, bool>> VirtualDocumentPath::CreateOrOpen()
 }
 
 }  // namespace base::files_internal
-
-DEFINE_JNI(VirtualDocumentPath)

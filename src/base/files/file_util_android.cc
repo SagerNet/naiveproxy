@@ -47,5 +47,3 @@ std::optional<FilePath> ResolveToVirtualDocumentPath(const FilePath& path) {
 }
 
 }  // namespace base
-
-DEFINE_JNI(FileUtils)
