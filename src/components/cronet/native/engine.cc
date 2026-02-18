@@ -586,6 +586,10 @@ class CustomRootSystemTrustStore : public net::SystemTrustStore {
     return trust_store_->Contains(cert);
   }
 
+  bool IsKnownMtcAnchor(const bssl::MTCAnchor* anchor) const override {
+    return false;
+  }
+
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
   net::PlatformTrustStore* GetPlatformTrustStore() override { return nullptr; }
 
@@ -595,6 +599,10 @@ class CustomRootSystemTrustStore : public net::SystemTrustStore {
   }
 
   int64_t chrome_root_store_version() const override { return 0; }
+
+  std::optional<base::Time> mtc_metadata_update_time() const override {
+    return std::nullopt;
+  }
 
   base::span<const net::ChromeRootCertConstraints> GetChromeRootConstraints(
       const bssl::ParsedCertificate* cert) const override {

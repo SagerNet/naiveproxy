@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/notimplemented.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
