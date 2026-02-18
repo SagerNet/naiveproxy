@@ -60,8 +60,9 @@ bool CanSetThreadTypeToRealtimeAudio() {
 void SetCurrentThreadTypeImpl(ThreadType thread_type,
                               MessagePumpType pump_type_hint,
                               bool may_change_affinity) {
+  (void)thread_type;
+  (void)pump_type_hint;
   (void)may_change_affinity;
-  SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint);
 }
 
 PlatformPriorityOverride SetThreadTypeOverride(
