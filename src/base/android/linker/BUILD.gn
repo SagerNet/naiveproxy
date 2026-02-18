@@ -42,7 +42,11 @@ shared_library("chromium_android_linker") {
       []) {
     configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
   }
-  configs += [ "//build/config/compiler:thinlto_optimize_max" ]
+  if (filter_include(
+          configs,
+          [ "//build/config/compiler:thinlto_optimize_max" ]) == []) {
+    configs += [ "//build/config/compiler:thinlto_optimize_max" ]
+  }
 
   # Disable orderfile instrumentation. Code in this target is in a different
   # .so, cannot call unexported instrumentation functions from another one (link
