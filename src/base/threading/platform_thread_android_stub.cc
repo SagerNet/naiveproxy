@@ -11,11 +11,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/threading/platform_thread_internal_posix.h"
 #include "base/threading/thread_id_name_manager.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
@@ -26,13 +24,10 @@ namespace internal {
 // - kBackground corresponds to Android's PRIORITY_BACKGROUND = 10 value and can
 // result in heavy throttling and force the thread onto a little core on
 // big.LITTLE devices.
-const ThreadPriorityToNiceValuePairForTest
-    kThreadPriorityToNiceValueMapForTest[7] = {
-        {ThreadPriorityForTest::kRealtimeAudio, -16},
-        {ThreadPriorityForTest::kDisplay, -4},
-        {ThreadPriorityForTest::kNormal, 0},
-        {ThreadPriorityForTest::kUtility, 1},
-        {ThreadPriorityForTest::kBackground, 10},
+const ThreadTypeToNiceValuePairForTest kThreadTypeToNiceValueMapForTest[7] = {
+    {ThreadType::kRealtimeAudio, -16}, {ThreadType::kDisplayCritical, -4},
+    {ThreadType::kDefault, 0},         {ThreadType::kUtility, 1},
+    {ThreadType::kBackground, 10},
 };
 
 // - kBackground corresponds to Android's PRIORITY_BACKGROUND = 10 value and can
@@ -67,9 +62,8 @@ bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
   return false;
 }
 
-absl::optional<ThreadPriorityForTest>
-GetCurrentThreadPriorityForPlatformForTest() {
-  return absl::nullopt;
+std::optional<ThreadType> GetCurrentEffectiveThreadTypeForPlatformForTest() {
+  return std::nullopt;
 }
 
 }  // namespace internal
