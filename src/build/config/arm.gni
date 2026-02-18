@@ -28,6 +28,9 @@ if (current_cpu == "arm" || v8_current_cpu == "arm") {
     # has increased code density.
     arm_use_thumb = true
 
+    # Optional -mtune value for ARM32 builds.
+    arm_tune = ""
+
     arm_cpu = ""
   }
 

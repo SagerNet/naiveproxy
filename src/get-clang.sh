@@ -83,6 +83,14 @@ case "$target_os" in
     esac
   ;;
 esac
+if [ "$WITH_PGO" -a ! -f chrome/build/$WITH_PGO.pgo.txt ]; then
+  if [ "$WITH_PGO" = android-arm64 -a -f chrome/build/android-desktop-arm64.pgo.txt ]; then
+    WITH_PGO=android-desktop-arm64
+  else
+    echo "PGO metadata chrome/build/$WITH_PGO.pgo.txt not found, skipping PGO prefetch."
+    WITH_PGO=
+  fi
+fi
 if [ "$WITH_PGO" ]; then
   PGO_PATH=$(cat chrome/build/$WITH_PGO.pgo.txt)
 fi
