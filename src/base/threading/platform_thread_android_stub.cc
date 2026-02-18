@@ -57,8 +57,34 @@ bool CanSetThreadTypeToRealtimeAudio() {
   return false;
 }
 
+void SetCurrentThreadTypeImpl(ThreadType thread_type,
+                              MessagePumpType pump_type_hint,
+                              bool may_change_affinity) {
+  (void)may_change_affinity;
+  SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint);
+}
+
+PlatformPriorityOverride SetThreadTypeOverride(
+    PlatformThreadHandle thread_handle,
+    ThreadType thread_type) {
+  (void)thread_handle;
+  (void)thread_type;
+  return false;
+}
+
+void RemoveThreadTypeOverride(
+    PlatformThreadHandle thread_handle,
+    const PlatformPriorityOverride& priority_override_handle,
+    ThreadType initial_thread_type) {
+  (void)thread_handle;
+  (void)priority_override_handle;
+  (void)initial_thread_type;
+}
+
 bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
                                      MessagePumpType pump_type_hint) {
+  (void)thread_type;
+  (void)pump_type_hint;
   return false;
 }
 
