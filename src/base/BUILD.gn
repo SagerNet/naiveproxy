@@ -357,6 +357,8 @@ component("base") {
     "macros/uniquify.h",
     "memory/aligned_memory.cc",
     "memory/aligned_memory.h",
+    "memory/advanced_memory_safety_checks.cc",
+    "memory/advanced_memory_safety_checks.h",
     "memory/asan_interface.h",
     "memory/free_deleter.h",
     "memory/memory_pressure_level.h",
@@ -589,7 +591,6 @@ component("base") {
     "run_loop.h",
     "sampling_heap_profiler/lock_free_address_hash_set.cc",
     "sampling_heap_profiler/lock_free_address_hash_set.h",
-    "sampling_heap_profiler/lock_free_bloom_filter.cc",
     "sampling_heap_profiler/lock_free_bloom_filter.h",
     "sampling_heap_profiler/poisson_allocation_sampler.cc",
     "sampling_heap_profiler/poisson_allocation_sampler.h",
@@ -618,8 +619,8 @@ component("base") {
     "strings/durable_string_view.h",
     "strings/escape.cc",
     "strings/escape.h",
-    "strings/latin1_string_conversions.cc",
-    "strings/latin1_string_conversions.h",
+    "strings/lazy_string_builder.cc",
+    "strings/lazy_string_builder.h",
     "strings/levenshtein_distance.cc",
     "strings/levenshtein_distance.h",
     "strings/pattern.cc",
@@ -1056,6 +1057,7 @@ component("base") {
 
   deps = [
     ":check_version_internal",
+    ":simdutf_shim",
     "//base/allocator:buildflags",
     "//base/third_party/cityhash",
     "//base/third_party/cityhash_v103",
@@ -1192,12 +1194,8 @@ component("base") {
       "memory/platform_shared_memory_region_android.cc",
     ]
 
-    sources += [
-      "android/linker/ashmem-dev.c",
-      "android/linker/ashmem.h",
-    ]
-
     deps += [
+      "//base/android/linker:ashmem",
       "//third_party/cpu_features:ndk_compat",
     ]
 
@@ -1449,8 +1447,6 @@ component("base") {
   }
 
   sources += [
-    "hash/md5.cc",
-    "hash/md5.h",
     "hash/sha1.cc",
     "hash/sha1.h",
   ]
@@ -2346,6 +2342,8 @@ component("base") {
     "trace_event/memory_dump_provider.h",
     "trace_event/memory_dump_provider_info.cc",
     "trace_event/memory_dump_provider_info.h",
+    "trace_event/measured_memory_dump_provider_info.cc",
+    "trace_event/measured_memory_dump_provider_info.h",
     "trace_event/memory_dump_request_args.cc",
     "trace_event/memory_dump_request_args.h",
     "trace_event/memory_dump_scheduler.cc",
@@ -2418,8 +2416,6 @@ component("base") {
     sources += [
       "trace_event/application_state_proto_android.cc",
       "trace_event/application_state_proto_android.h",
-      "trace_event/cpufreq_monitor_android.cc",
-      "trace_event/cpufreq_monitor_android.h",
       "trace_event/java_heap_dump_provider_android.cc",
       "trace_event/java_heap_dump_provider_android.h",
     ]
@@ -2585,6 +2581,24 @@ buildflag_header("protected_memory_buildflags") {
   flags = [ "PROTECTED_MEMORY_ENABLED=$protected_memory_enabled" ]
 }
 
+# Separate simdutf from ":base", so simdutf cannot accidentally affect the
+# build config for ":base".
+source_set("simdutf_shim") {
+  visibility = [ ":base" ]
+  configs += [
+    "//build/config/compiler:wexit_time_destructors",
+    "//build/config/compiler:wglobal_constructors",
+  ]
+  if (!is_win) {
+    # Generates -Werror,-Wsign-conversion
+    configs += [ "//build/config/compiler:prevent_unsafe_narrowing" ]
+  }
+
+  public = [ "simdutf_shim.h" ]
+  sources = [ "simdutf_shim.cc" ]
+  deps = [ "//third_party/simdutf:simdutf" ]
+}
+
 buildflag_header("synchronization_buildflags") {
   header = "synchronization_buildflags.h"
   header_dir = "base/synchronization"
@@ -2717,6 +2731,17 @@ copy("build_date") {
   sources = [ "$root_build_dir/gen/base/generated_build_date_internal.h" ]
   outputs = [ _build_date_header ]
   deps = [ ":build_date_internal($default_toolchain)" ]
+}
+
+source_set("build_time") {
+  # This is a header-only target, but the header should stay private to
+  # dependents requesting //base:build_time explicitly.
+  sources = [ _build_date_header ]
+  public_deps = [
+    ":base",
+    ":build_date",
+  ]
+  public = [ "build_time.h" ]
 }
 
 process_version("check_version_internal") {
