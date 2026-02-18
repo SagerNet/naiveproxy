@@ -20,7 +20,7 @@ constexpr bool IsValidMemoryDumpProviderName(std::string_view name) {
     const bool is_ascii_alpha =
         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     const bool is_ascii_digit = c >= '0' && c <= '9';
-    if (!is_ascii_alpha && !is_ascii_digit && c != '_') {
+    if (!is_ascii_alpha && !is_ascii_digit && c != '_' && c != '.') {
       return false;
     }
   }
