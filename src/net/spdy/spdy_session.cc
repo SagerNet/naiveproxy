@@ -13,6 +13,7 @@
 #include <tuple>
 #include <utility>
 
+#include "build/build_config.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/containers/span_writer.h"
@@ -3281,7 +3282,12 @@ void SpdySession::IncreaseRecvWindowSize(int32_t delta_window_size) {
   session_unacked_recv_window_bytes_ += delta_window_size;
   const base::TimeDelta elapsed =
       base::TimeTicks::Now() - last_recv_window_update_;
-  if (session_unacked_recv_window_bytes_ > session_max_recv_window_size_ / 2 ||
+#if BUILDFLAG(IS_IOS)
+  constexpr int kWindowUpdateDivisor = 8;
+#else
+  constexpr int kWindowUpdateDivisor = 2;
+#endif
+  if (session_unacked_recv_window_bytes_ > session_max_recv_window_size_ / kWindowUpdateDivisor ||
       elapsed >= time_to_buffer_small_window_updates_) {
     last_recv_window_update_ = base::TimeTicks::Now();
     SendWindowUpdateFrame(spdy::kSessionFlowControlStreamId,
