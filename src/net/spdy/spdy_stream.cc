@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "build/build_config.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
@@ -274,7 +275,12 @@ void SpdyStream::IncreaseRecvWindowSize(int32_t delta_window_size) {
   unacked_recv_window_bytes_ += delta_window_size;
   const base::TimeDelta elapsed =
       base::TimeTicks::Now() - last_recv_window_update_;
-  if (unacked_recv_window_bytes_ > max_recv_window_size_ / 2 ||
+#if BUILDFLAG(IS_IOS)
+  constexpr int kWindowUpdateDivisor = 8;
+#else
+  constexpr int kWindowUpdateDivisor = 2;
+#endif
+  if (unacked_recv_window_bytes_ > max_recv_window_size_ / kWindowUpdateDivisor ||
       elapsed >= session_->TimeToBufferSmallWindowUpdates()) {
     last_recv_window_update_ = base::TimeTicks::Now();
     session_->SendStreamWindowUpdate(
