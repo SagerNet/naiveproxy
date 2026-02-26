@@ -94,6 +94,13 @@ CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
                                               Cronet_UdpDialerFunc dialer,
                                               void* context);
 
+// Closes all connections managed by the engine's network session.
+// This includes socket pools, HTTP stream pool, SPDY session pool,
+// and QUIC session pool. Useful for releasing connection-related memory
+// or speeding up engine shutdown.
+// Must be called after Cronet_Engine_StartWithParams().
+CRONET_EXPORT void Cronet_Engine_CloseAllConnections(Cronet_EnginePtr engine);
+
 #ifdef __cplusplus
 }
 #endif
