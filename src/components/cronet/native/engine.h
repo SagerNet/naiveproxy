@@ -67,6 +67,9 @@ class Cronet_EngineImpl : public Cronet_Engine {
       int (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
       void* context);
 
+  // Close all connections managed by the engine's network session.
+  void CloseAllConnections();
+
   // Get stream engine for GRPC Bidirectional Stream support. The returned
   // stream_engine is owned by |this| and is only valid until |this| shutdown.
   stream_engine* GetBidirectionalStreamEngine();
