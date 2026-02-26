@@ -25,6 +25,7 @@
 #include "components/cronet/version.h"
 #include "components/grpc_support/include/bidirectional_stream_c.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/net_errors.h"
 #include "net/base/hash_value.h"
 #include "net/base/proxy_delegate.h"
 #include "net/cert/cert_verify_proc.h"
@@ -36,6 +37,8 @@
 #include "net/cert/multi_threaded_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "third_party/boringssl/src/pki/cert_errors.h"
 #include "third_party/boringssl/src/pki/parse_certificate.h"
@@ -527,6 +530,31 @@ void Cronet_EngineImpl::SetUdpDialer(
   udp_dialer_context_ = context;
 }
 
+void Cronet_EngineImpl::CloseAllConnections() {
+  init_completed_.Wait();
+  base::AutoLock lock(lock_);
+  if (!context_)
+    return;
+  base::WaitableEvent done;
+  context_->PostTaskToNetworkThread(
+      FROM_HERE,
+      base::BindOnce(
+          [](CronetContext* ctx, base::WaitableEvent* event) {
+            auto* context = ctx->GetURLRequestContext();
+            if (context && context->http_transaction_factory()) {
+              auto* session =
+                  context->http_transaction_factory()->GetSession();
+              if (session) {
+                session->CloseAllConnections(net::ERR_ABORTED,
+                                             "CloseAllConnections()");
+              }
+            }
+            event->Signal();
+          },
+          context_.get(), &done));
+  done.Wait();
+}
+
 stream_engine* Cronet_EngineImpl::GetBidirectionalStreamEngine() {
   init_completed_.Wait();
   return stream_engine_.get();
@@ -553,6 +581,11 @@ CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
   return engine_impl->GetBidirectionalStreamEngine();
+}
+
+CRONET_EXPORT void Cronet_Engine_CloseAllConnections(
+    Cronet_EnginePtr engine) {
+  static_cast<cronet::Cronet_EngineImpl*>(engine)->CloseAllConnections();
 }
 
 CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
