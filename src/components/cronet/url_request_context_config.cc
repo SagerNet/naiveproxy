@@ -630,6 +630,13 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         }
       }
 
+      quic_params->initial_stream_recv_window_size =
+          quic_args.FindInt("initial_stream_recv_window_size")
+              .value_or(quic_params->initial_stream_recv_window_size);
+      quic_params->initial_session_recv_window_size =
+          quic_args.FindInt("initial_session_recv_window_size")
+              .value_or(quic_params->initial_session_recv_window_size);
+
       const std::string* quic_flags = quic_args.FindString(kQuicFlags);
       if (quic_flags) {
         for (const auto& flag :
