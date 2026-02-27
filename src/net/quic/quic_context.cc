@@ -93,8 +93,9 @@ quic::QuicConfig InitializeQuicConfig(const QuicParams& params) {
   config.SetClientConnectionOptions(params.client_connection_options);
   config.set_max_undecryptable_packets(kMaxUndecryptablePackets);
   config.SetInitialSessionFlowControlWindowToSend(
-      kQuicSessionMaxRecvWindowSize);
-  config.SetInitialStreamFlowControlWindowToSend(kQuicStreamMaxRecvWindowSize);
+      params.initial_session_recv_window_size);
+  config.SetInitialStreamFlowControlWindowToSend(
+      params.initial_stream_recv_window_size);
   config.SetBytesForConnectionIdToSend(0);
   return config;
 }
