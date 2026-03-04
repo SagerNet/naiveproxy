@@ -11,36 +11,24 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/lazy_instance.h"
+#include <optional>
+
 #include "base/logging.h"
 #include "base/threading/platform_thread_internal_posix.h"
 #include "base/threading/thread_id_name_manager.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
 namespace internal {
 
-// - kRealtimeAudio corresponds to Android's PRIORITY_AUDIO = -16 value.
-// - kDisplay corresponds to Android's PRIORITY_DISPLAY = -4 value.
-// - kBackground corresponds to Android's PRIORITY_BACKGROUND = 10 value and can
-// result in heavy throttling and force the thread onto a little core on
-// big.LITTLE devices.
-const ThreadPriorityToNiceValuePairForTest
-    kThreadPriorityToNiceValueMapForTest[7] = {
-        {ThreadPriorityForTest::kRealtimeAudio, -16},
-        {ThreadPriorityForTest::kDisplay, -4},
-        {ThreadPriorityForTest::kNormal, 0},
-        {ThreadPriorityForTest::kUtility, 1},
-        {ThreadPriorityForTest::kBackground, 10},
+const ThreadTypeToNiceValuePairForTest
+    kThreadTypeToNiceValueMapForTest[7] = {
+        {ThreadType::kRealtimeAudio, -16},
+        {ThreadType::kDisplayCritical, -4},
+        {ThreadType::kDefault, 0},
+        {ThreadType::kUtility, 1},
+        {ThreadType::kBackground, 10},
 };
-
-// - kBackground corresponds to Android's PRIORITY_BACKGROUND = 10 value and can
-// result in heavy throttling and force the thread onto a little core on
-// big.LITTLE devices.
-// - kUtility corresponds to Android's THREAD_PRIORITY_LESS_FAVORABLE = 1 value.
-// - kDisplayCritical corresponds to Android's PRIORITY_DISPLAY = -4 value.
-// - kRealtimeAudio corresponds to Android's PRIORITY_AUDIO = -16 value.
 
 int ThreadTypeToNiceValue(const ThreadType thread_type) {
   switch (thread_type) {
@@ -67,9 +55,26 @@ bool SetCurrentThreadTypeForPlatform(ThreadType thread_type,
   return false;
 }
 
-absl::optional<ThreadPriorityForTest>
-GetCurrentThreadPriorityForPlatformForTest() {
-  return absl::nullopt;
+std::optional<ThreadType>
+GetCurrentEffectiveThreadTypeForPlatformForTest() {
+  return std::nullopt;
+}
+
+void SetCurrentThreadTypeImpl(ThreadType thread_type,
+                              MessagePumpType pump_type_hint,
+                              bool may_change_affinity) {
+}
+
+PlatformPriorityOverride SetThreadTypeOverride(
+    PlatformThreadHandle thread_handle,
+    ThreadType thread_type) {
+  return false;
+}
+
+void RemoveThreadTypeOverride(
+    PlatformThreadHandle thread_handle,
+    const PlatformPriorityOverride& priority_override_handle,
+    ThreadType initial_thread_type) {
 }
 
 }  // namespace internal
