@@ -29,6 +29,7 @@ if (current_cpu == "arm" || v8_current_cpu == "arm") {
     arm_use_thumb = true
 
     arm_cpu = ""
+    arm_tune = ""
   }
 
   if (current_os == "android" || target_os == "android") {
