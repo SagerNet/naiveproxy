@@ -12,13 +12,12 @@ config("jni_include_dir") {
 # This is the public target that we intend others to use.
 component("jni_zero") {
   public = [
-    "common_apis.h",
     "default_conversions.h",
     "jni_zero.h",
   ]
 
   sources = [
-    "common_apis.cc",
+    "common_apis.h",
     "default_conversions.cc",
     "java_refs.cc",
     "java_refs.h",
