@@ -355,5 +355,3 @@ jclass LazyGetClass(JNIEnv* env,
 
 }  // namespace internal
 }  // namespace jni_zero
-
-DEFINE_JNI(JniInit)
