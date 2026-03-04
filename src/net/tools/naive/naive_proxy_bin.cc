@@ -359,13 +359,13 @@ int main(int argc, char* argv[]) {
   url::AddStandardScheme("socks",
                          url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION);
   url::AddStandardScheme("redir", url::SCHEME_WITH_HOST_AND_PORT);
-  net::ClientSocketPoolManager::set_max_sockets_per_pool(
+  net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,
       kDefaultMaxSocketsPerPool * kExpectedMaxUsers);
   net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,
       kDefaultMaxSocketsPerPool * kExpectedMaxUsers);
-  net::ClientSocketPoolManager::set_max_sockets_per_group(
+  net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
       net::HttpNetworkSession::NORMAL_SOCKET_POOL,
       kDefaultMaxSocketsPerGroup * kExpectedMaxUsers);
 

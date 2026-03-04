@@ -858,7 +858,7 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       std::optional<int> max_sockets_per_pool =
           args.FindInt("max_sockets_per_pool");
       if (max_sockets_per_pool.has_value()) {
-        net::ClientSocketPoolManager::set_max_sockets_per_pool(
+        net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
             net::HttpNetworkSession::NORMAL_SOCKET_POOL,
             *max_sockets_per_pool);
       }
@@ -872,7 +872,7 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       std::optional<int> max_sockets_per_group =
           args.FindInt("max_sockets_per_group");
       if (max_sockets_per_group.has_value()) {
-        net::ClientSocketPoolManager::set_max_sockets_per_group(
+        net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
             net::HttpNetworkSession::NORMAL_SOCKET_POOL,
             *max_sockets_per_group);
       }
