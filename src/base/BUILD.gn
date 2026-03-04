@@ -206,6 +206,8 @@ component("base") {
     "base64.h",
     "base64url.cc",
     "base64url.h",
+    "simdutf_shim.cc",
+    "simdutf_shim.h",
     "base_switches.h",
     "big_endian.h",
     "bit_cast.h",
@@ -356,6 +358,8 @@ component("base") {
     "macros/is_empty.h",
     "macros/remove_parens.h",
     "macros/uniquify.h",
+    "memory/advanced_memory_safety_checks.cc",
+    "memory/advanced_memory_safety_checks.h",
     "memory/aligned_memory.cc",
     "memory/aligned_memory.h",
     "memory/asan_interface.h",
@@ -584,7 +588,6 @@ component("base") {
     "run_loop.h",
     "sampling_heap_profiler/lock_free_address_hash_set.cc",
     "sampling_heap_profiler/lock_free_address_hash_set.h",
-    "sampling_heap_profiler/lock_free_bloom_filter.cc",
     "sampling_heap_profiler/lock_free_bloom_filter.h",
     "sampling_heap_profiler/poisson_allocation_sampler.cc",
     "sampling_heap_profiler/poisson_allocation_sampler.h",
@@ -613,8 +616,6 @@ component("base") {
     "strings/durable_string_view.h",
     "strings/escape.cc",
     "strings/escape.h",
-    "strings/latin1_string_conversions.cc",
-    "strings/latin1_string_conversions.h",
     "strings/levenshtein_distance.cc",
     "strings/levenshtein_distance.h",
     "strings/pattern.cc",
@@ -1060,6 +1061,7 @@ component("base") {
     "//build:ios_buildflags",
     "//build/config/compiler:compiler_buildflags",
     "//third_party/modp_b64",
+    "//third_party/simdutf",
   ]
 
   # Used by metrics/crc32
@@ -1549,8 +1551,6 @@ component("base") {
   }
 
   sources += [
-    "hash/md5.cc",
-    "hash/md5.h",
     "hash/sha1.cc",
     "hash/sha1.h",
   ]
@@ -2419,7 +2419,6 @@ component("base") {
   }
 
   sources += [
-    "trace_event/auto_open_close_event.h",
     "trace_event/builtin_categories.h",
     "trace_event/heap_profiler.h",
     "trace_event/interned_args_helper.cc",
@@ -2428,6 +2427,8 @@ component("base") {
     "trace_event/log_message.h",
     "trace_event/malloc_dump_provider.cc",
     "trace_event/malloc_dump_provider.h",
+    "trace_event/measured_memory_dump_provider_info.cc",
+    "trace_event/measured_memory_dump_provider_info.h",
     "trace_event/memory_allocator_dump.cc",
     "trace_event/memory_allocator_dump.h",
     "trace_event/memory_dump_manager.cc",
@@ -2508,8 +2509,6 @@ component("base") {
     sources += [
       "trace_event/application_state_proto_android.cc",
       "trace_event/application_state_proto_android.h",
-      "trace_event/cpufreq_monitor_android.cc",
-      "trace_event/cpufreq_monitor_android.h",
       "trace_event/java_heap_dump_provider_android.cc",
       "trace_event/java_heap_dump_provider_android.h",
     ]
@@ -2908,4 +2907,18 @@ process_version("check_version_internal") {
       "NEXT_VERSION_MAJOR=\"9999\"",
     ]
   }
+}
+
+source_set("compiler_specific") {
+  public = [ "compiler_specific.h" ]
+}
+
+source_set("build_time") {
+  # This is a header, but it should be private.
+  sources = [ _build_date_header ]
+  public_deps = [
+    ":base",
+    ":build_date",
+  ]
+  public = [ "build_time.h" ]
 }
