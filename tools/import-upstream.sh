@@ -22,7 +22,7 @@ else
   curl "$url" -o- | tar xJf - --wildcards --wildcards-match-slash -T tools/include.txt -X tools/exclude.txt
 fi
 mv "$name" src
-for component in cronet grpc_support prefs; do
+for component in cronet prefs; do
   component_url="https://chromium.googlesource.com/chromium/src/+archive/refs/tags/$want_version/components/$component.tar.gz"
   mkdir -p "src/components/$component"
   curl -sL "$component_url" | tar xzf - -C "src/components/$component"
@@ -30,4 +30,5 @@ done
 git rm --quiet --force -r tools
 git add src
 git commit --quiet --amend -m "Import $name" --date=now
-git rebase --onto HEAD "$root" "$branch"
+echo "Import done. Root commit amended. Run rebase manually:"
+echo "  git rebase --onto HEAD $root $branch"
