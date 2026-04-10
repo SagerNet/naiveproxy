@@ -8,7 +8,6 @@ import("//build/toolchain/toolchain.gni")
 import("//build/util/lastchange.gni")
 import("//build/util/process_version.gni")
 import("//chrome/version.gni")
-import("//testing/test.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 declare_args() {
@@ -77,24 +76,6 @@ source_set("metrics_util") {
   deps = [
     "//base",
     "//net:net",
-  ]
-}
-
-# Unit tests for Cronet common implementation.
-source_set("cronet_common_unittests") {
-  testonly = true
-
-  deps = [
-    ":cronet_common",
-    "//components/prefs:test_support",
-    "//net:test_support",
-  ]
-
-  sources = [
-    "cronet_stale_host_resolver_unittest.cc",
-    "host_cache_persistence_manager_unittest.cc",
-    "network_tasks_unittest.cc",
-    "url_request_context_config_unittest.cc",
   ]
 }
 

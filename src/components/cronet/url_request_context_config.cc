@@ -711,8 +711,8 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         effective_experimental_options.Remove(iter->first);
         continue;
       }
-      const base::Value::Dict& dns_server_args = iter->second.GetDict();
-      const base::Value::List* nameservers_list =
+      const base::DictValue& dns_server_args = iter->second.GetDict();
+      const base::ListValue* nameservers_list =
           dns_server_args.FindList(kDnsServerOverrideNameservers);
       if (nameservers_list) {
         for (const auto& nameserver : *nameservers_list) {
@@ -838,7 +838,7 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         effective_experimental_options.Remove(iter->first);
         continue;
       }
-      const base::Value::Dict& args = iter->second.GetDict();
+      const base::DictValue& args = iter->second.GetDict();
       std::optional<int> session_max_recv_window_size =
           args.FindInt("session_max_recv_window_size");
       if (session_max_recv_window_size.has_value()) {
@@ -859,7 +859,7 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         effective_experimental_options.Remove(iter->first);
         continue;
       }
-      const base::Value::Dict& args = iter->second.GetDict();
+      const base::DictValue& args = iter->second.GetDict();
       std::optional<int> max_sockets_per_pool =
           args.FindInt("max_sockets_per_pool");
       if (max_sockets_per_pool.has_value()) {
