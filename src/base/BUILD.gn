@@ -1238,7 +1238,7 @@ component("base") {
     ]
 
     sources += [
-      "android/linker/ashmem-dev.c",
+      "android/linker/ashmem.cc",
       "android/linker/ashmem.h",
     ]
 
