@@ -638,8 +638,13 @@ class CustomRootSystemTrustStore : public net::SystemTrustStore {
   }
 
   base::span<const net::ChromeRootCertConstraints> GetChromeRootConstraints(
-      const bssl::ParsedCertificate* cert) const override {
+      const bssl::CertPathBuilderResultPath* path) const override {
     return {};
+  }
+
+  const net::TrustStoreChrome::MtcAnchorExtraData* GetMTCAnchorData(
+      base::span<const uint8_t> log_id) const override {
+    return nullptr;
   }
 
   bssl::TrustStore* eutl_trust_store() override { return nullptr; }
