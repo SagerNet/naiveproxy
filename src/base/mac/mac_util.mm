@@ -29,6 +29,7 @@
 #include "base/logging.h"
 #include "base/mac/scoped_aedesc.h"
 #include "base/mac/scoped_ioobject.h"
+#include "base/message_loop/ios_cronet_buildflags.h"
 #include "base/posix/sysctl.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -41,6 +42,7 @@ namespace base::mac {
 
 namespace {
 
+#if !BUILDFLAG(CRONET_BUILD)
 class LoginItemsFileList {
  public:
   LoginItemsFileList() = default;
@@ -123,6 +125,7 @@ bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
 
   return hidden && hidden.get() == kCFBooleanTrue;
 }
+#endif  // !BUILDFLAG(CRONET_BUILD)
 
 }  // namespace
 
@@ -136,6 +139,11 @@ CGColorSpaceRef GetSRGBColorSpace() {
 
 void AddToLoginItems(const FilePath& app_bundle_file_path,
                      bool hide_on_startup) {
+#if BUILDFLAG(CRONET_BUILD)
+  (void)app_bundle_file_path;
+  (void)hide_on_startup;
+  return;
+#else
   LoginItemsFileList login_items;
   if (!login_items.Initialize()) {
     return;
@@ -174,9 +182,14 @@ void AddToLoginItems(const FilePath& app_bundle_file_path,
   if (!new_item.get()) {
     DLOG(ERROR) << "Couldn't insert current app into Login Items list.";
   }
+#endif
 }
 
 void RemoveFromLoginItems(const FilePath& app_bundle_file_path) {
+#if BUILDFLAG(CRONET_BUILD)
+  (void)app_bundle_file_path;
+  return;
+#else
   LoginItemsFileList login_items;
   if (!login_items.Initialize()) {
     return;
@@ -193,6 +206,7 @@ void RemoveFromLoginItems(const FilePath& app_bundle_file_path) {
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   LSSharedFileListItemRemove(login_items.GetLoginFileList(), item.get());
 #pragma clang diagnostic pop
+#endif
 }
 
 bool WasLaunchedAsLoginOrResumeItem() {
@@ -248,6 +262,9 @@ bool WasLaunchedAsLoginItemRestoreState() {
 }
 
 bool WasLaunchedAsHiddenLoginItem() {
+#if BUILDFLAG(CRONET_BUILD)
+  return false;
+#else
   if (!WasLaunchedAsLoginOrResumeItem()) {
     return false;
   }
@@ -264,6 +281,7 @@ bool WasLaunchedAsHiddenLoginItem() {
     return false;
   }
   return IsHiddenLoginItem(item.get());
+#endif
 }
 
 bool RemoveQuarantineAttribute(const FilePath& file_path) {
@@ -631,6 +649,11 @@ void OpenSystemSettingsPane(SystemSettingsPane pane,
     return;
   }
 
+#if BUILDFLAG(CRONET_BUILD)
+  (void)subpane_data;
+  [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:pane_file]];
+  return;
+#else
   NSAppleEventDescriptor* subpane_descriptor;
   NSArray* pane_file_urls = @[ [NSURL fileURLWithPath:pane_file] ];
 
@@ -645,6 +668,7 @@ void OpenSystemSettingsPane(SystemSettingsPane pane,
   launchSpec.launchFlags = kLSLaunchAsync | kLSLaunchDontAddToRecents;
 
   LSOpenFromURLSpec(&launchSpec, nullptr);
+#endif
 }
 
 }  // namespace base::mac

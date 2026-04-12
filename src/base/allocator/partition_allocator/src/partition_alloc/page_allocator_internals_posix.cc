@@ -27,14 +27,36 @@
 #endif
 
 #if PA_BUILDFLAG(IS_MAC)
+namespace {
 
-// SecTaskGetCodeSignStatus is marked as unavailable on macOS, although it’s
-// available on iOS and other Apple operating systems. It is, in fact, present
-// on the system since macOS 10.12.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wavailability"
-uint32_t SecTaskGetCodeSignStatus(SecTaskRef task) API_AVAILABLE(macos(10.12));
-#pragma clang diagnostic pop
+bool HasHardenedRuntime() {
+  partition_alloc::internal::base::apple::ScopedCFTypeRef<SecCodeRef> code;
+  if (SecCodeCopySelf(/*flags=*/0, code.InitializeInto()) != errSecSuccess ||
+      !code) {
+    return false;
+  }
+
+  partition_alloc::internal::base::apple::ScopedCFTypeRef<CFDictionaryRef>
+      signing_info;
+  if (SecCodeCopySigningInformation(code.get(), kSecCSSigningInformation,
+                                    signing_info.InitializeInto()) !=
+          errSecSuccess ||
+      !signing_info) {
+    return false;
+  }
+
+  auto* flags_ref = partition_alloc::internal::base::apple::CFCast<CFNumberRef>(
+      CFDictionaryGetValue(signing_info.get(), kSecCodeInfoFlags));
+  if (!flags_ref) {
+    return false;
+  }
+
+  uint32_t flags = 0;
+  return CFNumberGetValue(flags_ref, kCFNumberSInt32Type, &flags) &&
+         (flags & kSecCodeSignatureRuntime);
+}
+
+}  // namespace
 
 #endif  // PA_BUILDFLAG(IS_MAC)
 
@@ -178,8 +200,7 @@ bool UseMapJit() {
     return true;
   }
 
-  uint32_t flags = SecTaskGetCodeSignStatus(task);
-  if (!(flags & kSecCodeSignatureRuntime)) {
+  if (!HasHardenedRuntime()) {
     // The hardened runtime is not enabled. Note that kSecCodeSignatureRuntime
     // == CS_RUNTIME.
     return true;
