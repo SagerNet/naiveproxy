@@ -2035,13 +2035,8 @@ component("base") {
       "mac/code_signature_spi.h",
       "mac/info_plist_data.h",
       "mac/info_plist_data.mm",
-      "mac/launch_application.h",
-      "mac/launch_application.mm",
-      "mac/launch_services_spi.h",
       "mac/launchd.cc",
       "mac/launchd.h",
-      "mac/login_util.cc",
-      "mac/login_util.h",
       "mac/mac_util.h",
       "mac/mac_util.mm",
       "mac/os_crash_dumps.cc",
@@ -2088,6 +2083,16 @@ component("base") {
       "synchronization/waitable_event_watcher_mac.cc",
       "system/sys_info_mac.mm",
     ]
+
+    if (!is_cronet_build) {
+      sources += [
+        "mac/launch_application.h",
+        "mac/launch_application.mm",
+        "mac/launch_services_spi.h",
+        "mac/login_util.cc",
+        "mac/login_util.h",
+      ]
+    }
 
     deps += [ ":plist_size_buildflags" ]
 
