@@ -91,7 +91,7 @@ ClientSocketPool* ClientSocketPoolManagerImpl::GetSocketPool(
         sockets_per_proxy_chain, sockets_per_group, additional_capacity,
         unused_idle_socket_timeout(pool_type_), proxy_chain,
         /*is_for_websockets=*/pool_type_ ==
-            HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
+            HttpNetworkSession::SocketPoolType::kWebSocket,
         &common_connect_job_params_, cleanup_on_ip_address_change_);
   }
 

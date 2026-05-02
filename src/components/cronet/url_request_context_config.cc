@@ -864,21 +864,21 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
           args.FindInt("max_sockets_per_pool");
       if (max_sockets_per_pool.has_value()) {
         net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
-            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            net::HttpNetworkSession::SocketPoolType::kNormal,
             *max_sockets_per_pool);
       }
       std::optional<int> max_sockets_per_proxy_chain =
           args.FindInt("max_sockets_per_proxy_chain");
       if (max_sockets_per_proxy_chain.has_value()) {
         net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
-            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            net::HttpNetworkSession::SocketPoolType::kNormal,
             *max_sockets_per_proxy_chain);
       }
       std::optional<int> max_sockets_per_group =
           args.FindInt("max_sockets_per_group");
       if (max_sockets_per_group.has_value()) {
         net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
-            net::HttpNetworkSession::NORMAL_SOCKET_POOL,
+            net::HttpNetworkSession::SocketPoolType::kNormal,
             *max_sockets_per_group);
       }
     } else {
