@@ -32,6 +32,7 @@
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "components/unexportable_keys/unexportable_key_service.h"
+#include "net/base/cronet_buildflags.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/base/network_handle.h"
@@ -51,11 +52,11 @@
 #include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/url_request/url_request_job_factory.h"
 
-#if BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_ANDROID) && !BUILDFLAG(CRONET_BUILD)
 #include "net/dns/dns_platform_attempt_factory_android.h"
-#else
+#elif !BUILDFLAG(IS_ANDROID)
 #include "net/dns/dns_platform_attempt_factory_not_implemented.h"
-#endif  // BUILDFLAG(IS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID) && !BUILDFLAG(CRONET_BUILD)
 
 namespace net {
 
@@ -569,12 +570,17 @@ class NET_EXPORT URLRequestContextBuilder {
   // URLRequestContext::dns_platform_attempt_factory() to build the DnsAttempt
   // backed by platform-specific APIs. Having said that, currently only Android
   // supports kPlatform. With that in mind:
-  // * When building for Android, we inject a working Android-specific factory
-  // * When building for other platforms, we inject a factory that does crashes
-  //   if interacted with. The expectation is for other platforms to never
-  //   specify AttemptMode::kPlatform until they support it.
+  // * When building for Android outside Cronet, we inject a working
+  //   Android-specific factory.
+  // * Android Cronet disables platform DNS; embedders provide their own DNS
+  //   plumbing.
+  // * Other platforms inject a factory that crashes if interacted with. The
+  //   expectation is for other platforms to never specify AttemptMode::kPlatform
+  //   until they support it.
   std::unique_ptr<DnsPlatformAttemptFactory> dns_platform_attempt_factory_ =
-#if BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_ANDROID) && BUILDFLAG(CRONET_BUILD)
+      nullptr;
+#elif BUILDFLAG(IS_ANDROID)
       DnsPlatformAttemptFactoryAndroid::Create();
 #else
       std::make_unique<DnsPlatformAttemptFactoryNotImplemented>();
