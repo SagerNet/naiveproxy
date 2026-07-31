@@ -25,17 +25,36 @@ mkdir -p third_party/llvm-build/Release+Asserts
 cd tools/clang/scripts
 CLANG_REVISION=$($PYTHON -c 'import update; print(update.PACKAGE_VERSION)')
 cd -
-echo $CLANG_REVISION >third_party/llvm-build/Release+Asserts/cr_build_revision
-if [ ! -d third_party/llvm-build/Release+Asserts/bin ]; then
+clang_dir=third_party/llvm-build/Release+Asserts
+clang_stamp="$clang_dir/cr_build_revision"
+clang_binary="$clang_dir/bin/clang"
+if [ "$host_os" = win ]; then
+  clang_binary="$clang_binary.exe"
+fi
+installed_clang_revision=
+if [ -f "$clang_stamp" ]; then
+  installed_clang_revision=$(cat "$clang_stamp")
+fi
+if [ "$installed_clang_revision" != "$CLANG_REVISION" ] || \
+   [ ! -f "$clang_binary" ]; then
+  rm -rf "$clang_dir"
   mkdir -p third_party/llvm-build/Release+Asserts
   clang_path="clang-$CLANG_REVISION.tar.xz"
   clang_url="https://commondatastorage.googleapis.com/chromium-browser-clang/$WITH_CLANG/$clang_path"
   curl "$clang_url" | tar xJf - -C third_party/llvm-build/Release+Asserts
-  if [ "$target_os" = android ]; then
-    clang_path="clang-android-runtime-library-$CLANG_REVISION.tar.xz"
-    clang_url="https://commondatastorage.googleapis.com/chromium-browser-clang/$WITH_CLANG/$clang_path"
-    curl "$clang_url" | tar xJf - -C third_party/llvm-build/Release+Asserts
-  fi
+  echo "$CLANG_REVISION" >"$clang_stamp"
+fi
+clang_android_runtime_stamp="$clang_dir/cr_android_runtime_revision"
+installed_clang_android_runtime_revision=
+if [ -f "$clang_android_runtime_stamp" ]; then
+  installed_clang_android_runtime_revision=$(cat "$clang_android_runtime_stamp")
+fi
+if [ "$target_os" = android ] && \
+   [ "$installed_clang_android_runtime_revision" != "$CLANG_REVISION" ]; then
+  clang_path="clang-android-runtime-library-$CLANG_REVISION.tar.xz"
+  clang_url="https://commondatastorage.googleapis.com/chromium-browser-clang/$WITH_CLANG/$clang_path"
+  curl "$clang_url" | tar xJf - -C third_party/llvm-build/Release+Asserts
+  echo "$CLANG_REVISION" >"$clang_android_runtime_stamp"
 fi
 
 # sccache
@@ -55,12 +74,23 @@ esac
 if [ "$host_os" = mac -a "$host_cpu" = arm64 ]; then
   WITH_GN=mac-arm64
 fi
-if [ ! -f gn/out/gn ]; then
-  gn_version=$(grep "'gn_version':" DEPS | cut -d"'" -f4)
+gn_version=$(grep "'gn_version':" DEPS | cut -d"'" -f4)
+gn_stamp=gn/out/cr_build_revision
+gn_binary=gn/out/gn
+if [ "$host_os" = win ]; then
+  gn_binary="$gn_binary.exe"
+fi
+installed_gn_version=
+if [ -f "$gn_stamp" ]; then
+  installed_gn_version=$(cat "$gn_stamp")
+fi
+if [ "$installed_gn_version" != "$gn_version" ] || [ ! -f "$gn_binary" ]; then
+  rm -rf gn/out
   mkdir -p gn/out
   curl -L "https://chrome-infra-packages.appspot.com/dl/gn/gn/$WITH_GN/+/$gn_version" -o gn.zip
   unzip gn.zip -d gn/out
   rm gn.zip
+  echo "$gn_version" >"$gn_stamp"
 fi
 
 # See src/build/config/compiler/pgo/BUILD.gn
