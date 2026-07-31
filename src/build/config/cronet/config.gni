@@ -28,7 +28,8 @@ declare_args() {
 declare_args() {
   # Signals that Cronet is being built. Building within Android always implies
   # that Cronet is being built.
-  is_cronet_build = is_cronet_for_aosp_build
+  # Enabled for naive/cronet-go builds.
+  is_cronet_build = true
 }
 
 # This should only ever happen if one decides to override, at the same time,

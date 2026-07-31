@@ -169,6 +169,10 @@ class CronetContext {
       net::handles::NetworkHandle network =
           net::handles::kInvalidNetworkHandle);
 
+  // Closes every HTTP network session owned by this context, then runs
+  // `completion`. This can be called on any thread.
+  void CloseAllConnections(base::OnceClosure completion);
+
   // Returns a new instance of net::URLRequestContextGetter.
   // The net::URLRequestContext and base::SingleThreadTaskRunner that
   // net::URLRequestContextGetter returns are owned by `this`.
@@ -297,6 +301,8 @@ class CronetContext {
 
     net::URLRequestContext* GetURLRequestContext(
         net::handles::NetworkHandle network);
+
+    void CloseAllConnections();
 
     // Same as StartNetLogToDisk.
     void StartNetLogToBoundedFile(const std::string& dir_path,

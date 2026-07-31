@@ -76,7 +76,7 @@ bool ConvertToUTF16WithSubstitutions(std::string_view text,
   return false;
 }
 
-bool ToUpper(std::u16string_view str, std::u16string* output) {
+bool ToUpperUsingLocale(std::u16string_view str, std::u16string* output) {
   base::apple::ScopedCFTypeRef<CFStringRef> cfstring =
       base::SysUTF16ToCFStringRef(str);
   base::apple::ScopedCFTypeRef<CFMutableStringRef> mutable_cfstring(

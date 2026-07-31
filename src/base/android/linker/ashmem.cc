@@ -62,18 +62,30 @@ void ReadIntProperty(void* cookie,
   (void)serial;
 }
 
+using SystemPropertyReadCallbackFunc = void (*)(
+    const prop_info*,
+    void (*)(void*, const char*, const char*, uint32_t),
+    void*);
+
 int SystemPropertyGetInt(const char* name) {
   int result = 0;
   if (__builtin_available(android 26, *)) {
+    // Standalone Cronet still targets API 23 with an NDK whose headers hide
+    // this API. Resolve it dynamically so the same binary retains the modern
+    // path on Android O+ without acquiring an API 26 link dependency.
+    static const SystemPropertyReadCallbackFunc read_callback =
+        reinterpret_cast<SystemPropertyReadCallbackFunc>(
+            dlsym(RTLD_DEFAULT, "__system_property_read_callback"));
     const prop_info* info = __system_property_find(name);
-    if (info) {
-      __system_property_read_callback(info, &ReadIntProperty, &result);
+    if (read_callback && info) {
+      read_callback(info, &ReadIntProperty, &result);
+      return result;
     }
-  } else {
-    char value[PROP_VALUE_MAX] = {};
-    if (__system_property_get(name, value) >= 1) {
-      result = atoi(value);
-    }
+  }
+
+  char value[PROP_VALUE_MAX] = {};
+  if (__system_property_get(name, value) >= 1) {
+    result = atoi(value);
   }
   return result;
 }

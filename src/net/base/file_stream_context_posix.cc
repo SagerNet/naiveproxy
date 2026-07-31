@@ -18,12 +18,13 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/task/task_runner.h"
+#include "net/base/cronet_buildflags.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
 #include "net/base/apple/guarded_fd.h"
-#endif  // BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
 
 namespace net {
 
@@ -33,7 +34,7 @@ FileStream::Context::Context(scoped_refptr<base::TaskRunner> task_runner)
 FileStream::Context::Context(base::File file,
                              scoped_refptr<base::TaskRunner> task_runner)
     : file_(std::move(file)), task_runner_(std::move(task_runner)) {
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
   // https://crbug.com/330771755: Guard against a file descriptor being closed
   // out from underneath the file.
   if (file_.IsValid()) {

@@ -15,11 +15,12 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "net/base/cronet_buildflags.h"
 #include "net/base/net_errors.h"
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
 #include "net/base/apple/guarded_fd.h"
-#endif  // BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
@@ -188,7 +189,7 @@ FileStream::Context::IOResult FileStream::Context::GetFileInfoImpl(
 }
 
 FileStream::Context::IOResult FileStream::Context::CloseFileImpl() {
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
   // https://crbug.com/330771755: Guard against a file descriptor being closed
   // out from underneath the file.
   if (file_.IsValid()) {
@@ -216,7 +217,7 @@ void FileStream::Context::OnOpenCompleted(CompletionOnceCallback callback,
   if (file_.IsValid() && !orphaned_)
     OnFileOpened();
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) && !BUILDFLAG(CRONET_BUILD)
   // https://crbug.com/330771755: Guard against a file descriptor being closed
   // out from underneath the file.
   if (file_.IsValid()) {

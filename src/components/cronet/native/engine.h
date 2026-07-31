@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_CRONET_NATIVE_ENGINE_H_
 #define COMPONENTS_CRONET_NATIVE_ENGINE_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <string>
 
@@ -58,6 +60,19 @@ class Cronet_EngineImpl : public Cronet_Engine {
   void SetMockCertVerifierForTesting(
       std::unique_ptr<net::CertVerifier> mock_cert_verifier);
 
+  // Set custom dialer for TCP connections. Must be called before
+  // StartWithParams.
+  void SetDialer(intptr_t (*dialer)(void*, const char*, uint16_t),
+                 void* context);
+
+  // Set custom dialer for UDP sockets. Must be called before StartWithParams.
+  void SetUdpDialer(
+      intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+      void* context);
+
+  // Close all connections managed by the engine's network session.
+  void CloseAllConnections();
+
   // Get stream engine for GRPC Bidirectional Stream support. The returned
   // stream_engine is owned by |this| and is only valid until |this| shutdown.
   stream_engine* GetBidirectionalStreamEngine();
@@ -103,6 +118,15 @@ class Cronet_EngineImpl : public Cronet_Engine {
 
   // Mock CertVerifier for testing. Only valid until StartWithParams.
   std::unique_ptr<net::CertVerifier> mock_cert_verifier_;
+
+  // Custom dialer for TCP connections. Only valid until StartWithParams.
+  intptr_t (*dialer_)(void*, const char*, uint16_t) = nullptr;
+  void* dialer_context_ = nullptr;
+
+  // Custom dialer for UDP sockets. Only valid until StartWithParams.
+  intptr_t (*udp_dialer_)(void*, const char*, uint16_t, char*, uint16_t*) =
+      nullptr;
+  void* udp_dialer_context_ = nullptr;
 
   // Stores registered RequestFinishedInfoListeners with their associated
   // Executors.
