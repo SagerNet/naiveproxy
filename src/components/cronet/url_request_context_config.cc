@@ -22,6 +22,9 @@
 #include "build/build_config.h"
 #include "components/cronet/cronet_proxy_delegate.h"
 #include "net/base/address_family.h"
+#include "net/base/cronet_buildflags.h"
+#include "net/base/ip_address.h"
+#include "net/base/url_util.h"
 #include "net/cert/caching_cert_verifier.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
@@ -29,14 +32,19 @@
 #include "net/dns/context_host_resolver.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
+#include "net/dns/public/dns_over_https_config.h"
+#include "net/dns/public/secure_dns_mode.h"
 #include "net/dns/stale_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties.h"
 #include "net/log/net_log.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/quic/set_quic_flag.h"
+#include "net/socket/client_socket_pool_manager.h"
+#include "net/socket/custom_client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
+#include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/crypto_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_tag.h"
@@ -181,6 +189,11 @@ const char kStaleDnsUseStaleOnNameNotResolved[] =
 const char kHostResolverRulesFieldTrialName[] = "HostResolverRules";
 const char kHostResolverRules[] = "host_resolver_rules";
 
+// DnsServerOverride experiment dictionary name.
+const char kDnsServerOverrideFieldTrialName[] = "DnsServerOverride";
+// Name of list of nameservers to use for DNS resolution.
+const char kDnsServerOverrideNameservers[] = "nameservers";
+
 // NetworkQualityEstimator (NQE) experiment dictionary name.
 const char kNetworkQualityEstimatorFieldTrialName[] = "NetworkQualityEstimator";
 
@@ -214,6 +227,9 @@ const char kDisableTlsZeroRtt[] = "disable_tls_zero_rtt";
 // underlying OS.
 const char kSpdyGoAwayOnIpChange[] = "spdy_go_away_on_ip_change";
 
+const char kHTTP2Options[] = "HTTP2Options";
+const char kSocketPoolOptions[] = "SocketPoolOptions";
+
 // Whether the connection status of all bidirectional streams (created through
 // the Cronet engine) should be monitored.
 // The value must be an integer (> 0) and will be interpreted as a suggestion
@@ -224,6 +240,7 @@ const char kBidiStreamDetectBrokenConnection[] =
 
 const char kUseDnsHttpsSvcbFieldTrialName[] = "UseDnsHttpsSvcb";
 const char kUseDnsHttpsSvcbUseAlpn[] = "use_alpn";
+const char kUseDnsHttpsSvcbEnable[] = "enable";
 
 // Serializes a base::Value into a string that can be used as the value of
 // JFV-encoded HTTP header [1].  If |value| is a list, we remove the outermost
@@ -436,10 +453,13 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
   bool async_dns_enable = false;
   bool stale_dns_enable = false;
   bool host_resolver_rules_enable = false;
+  bool dns_server_override_enable = false;
   bool disable_ipv6_on_wifi = false;
   bool nel_enable = false;
+  bool use_dns_https_svcb_enable = true;
   bool is_network_bound = bound_network != net::handles::kInvalidNetworkHandle;
   std::optional<net::HostResolver::HttpsSvcbOptions> https_svcb_options;
+  std::vector<net::IPEndPoint> dns_server_override_nameservers;
 
   net::StaleHostResolver::StaleOptions stale_dns_options;
   // TODO(crbug.com/399372859): Run an experiment to use the default
@@ -623,6 +643,13 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         }
       }
 
+      quic_params->initial_stream_recv_window_size =
+          quic_args.FindInt("initial_stream_recv_window_size")
+              .value_or(quic_params->initial_stream_recv_window_size);
+      quic_params->initial_session_recv_window_size =
+          quic_args.FindInt("initial_session_recv_window_size")
+              .value_or(quic_params->initial_session_recv_window_size);
+
       const std::string* quic_flags = quic_args.FindString(kQuicFlags);
       if (quic_flags) {
         for (const auto& flag :
@@ -691,6 +718,40 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       host_resolver_rules_string =
           host_resolver_rules_args.FindString(kHostResolverRules);
       host_resolver_rules_enable = !!host_resolver_rules_string;
+    } else if (iter->first == kDnsServerOverrideFieldTrialName) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::DictValue& dns_server_args = iter->second.GetDict();
+      const base::ListValue* nameservers_list =
+          dns_server_args.FindList(kDnsServerOverrideNameservers);
+      if (nameservers_list) {
+        for (const auto& nameserver : *nameservers_list) {
+          if (!nameserver.is_string())
+            continue;
+          std::string host;
+          int port;
+          if (!net::ParseHostAndPort(nameserver.GetString(), &host, &port)) {
+            LOG(WARNING) << "Invalid nameserver address: "
+                         << nameserver.GetString();
+            continue;
+          }
+          if (port == -1) {
+            port = 53;  // Default DNS port
+          }
+          std::optional<net::IPAddress> ip_address =
+              net::IPAddress::FromIPLiteral(host);
+          if (!ip_address) {
+            LOG(WARNING) << "Invalid nameserver IP address: " << host;
+            continue;
+          }
+          dns_server_override_nameservers.emplace_back(*ip_address, port);
+        }
+        dns_server_override_enable = !dns_server_override_nameservers.empty();
+      }
     } else if (iter->first == kUseDnsHttpsSvcbFieldTrialName) {
       if (!iter->second.is_dict()) {
         LOG(ERROR) << "\"" << iter->first << "\" config params \""
@@ -703,6 +764,14 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
       session_params->use_dns_https_svcb_alpn =
           args.FindBool(kUseDnsHttpsSvcbUseAlpn)
               .value_or(session_params->use_dns_https_svcb_alpn);
+      const std::optional<bool> enable_https_svcb =
+          args.FindBool(kUseDnsHttpsSvcbEnable);
+      if (enable_https_svcb.has_value()) {
+        use_dns_https_svcb_enable = *enable_https_svcb;
+        if (!use_dns_https_svcb_enable) {
+          session_params->use_dns_https_svcb_alpn = false;
+        }
+      }
     } else if (iter->first == kNetworkErrorLoggingFieldTrialName) {
       if (!iter->second.is_dict()) {
         LOG(ERROR) << "\"" << iter->first << "\" config params \""
@@ -776,6 +845,56 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         continue;
       }
       session_params->spdy_go_away_on_ip_change = iter->second.GetBool();
+    } else if (iter->first == kHTTP2Options) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::DictValue& args = iter->second.GetDict();
+      std::optional<int> session_max_recv_window_size =
+          args.FindInt("session_max_recv_window_size");
+      if (session_max_recv_window_size.has_value()) {
+        session_params->spdy_session_max_recv_window_size =
+            static_cast<size_t>(*session_max_recv_window_size);
+      }
+      std::optional<int> initial_window_size =
+          args.FindInt("initial_window_size");
+      if (initial_window_size.has_value()) {
+        session_params
+            ->http2_settings[spdy::SETTINGS_INITIAL_WINDOW_SIZE] =
+            static_cast<uint32_t>(*initial_window_size);
+      }
+    } else if (iter->first == kSocketPoolOptions) {
+      if (!iter->second.is_dict()) {
+        LOG(ERROR) << "\"" << iter->first << "\" config params \""
+                   << iter->second << "\" is not a dictionary value";
+        effective_experimental_options.Remove(iter->first);
+        continue;
+      }
+      const base::DictValue& args = iter->second.GetDict();
+      std::optional<int> max_sockets_per_pool =
+          args.FindInt("max_sockets_per_pool");
+      if (max_sockets_per_pool.has_value()) {
+        net::ClientSocketPoolManager::set_socket_soft_cap_per_pool_for_test(
+            net::HttpNetworkSession::SocketPoolType::kNormal,
+            *max_sockets_per_pool);
+      }
+      std::optional<int> max_sockets_per_proxy_chain =
+          args.FindInt("max_sockets_per_proxy_chain");
+      if (max_sockets_per_proxy_chain.has_value()) {
+        net::ClientSocketPoolManager::set_max_sockets_per_proxy_chain(
+            net::HttpNetworkSession::SocketPoolType::kNormal,
+            *max_sockets_per_proxy_chain);
+      }
+      std::optional<int> max_sockets_per_group =
+          args.FindInt("max_sockets_per_group");
+      if (max_sockets_per_group.has_value()) {
+        net::ClientSocketPoolManager::set_max_sockets_per_group_for_test(
+            net::HttpNetworkSession::SocketPoolType::kNormal,
+            *max_sockets_per_group);
+      }
     } else {
       LOG(WARNING) << "Unrecognized Cronet experimental option \""
                    << iter->first << "\" with params \"" << iter->second;
@@ -809,19 +928,48 @@ void URLRequestContextConfig::SetContextBuilderExperimentalOptions(
         quic::ParseQuicTagVector(kConnectionOptionsForceOff.Get()));
   }
 
+#if BUILDFLAG(IS_ANDROID) && BUILDFLAG(CRONET_BUILD)
+  // Standalone Android Cronet builds do not link the Java-backed platform DNS
+  // implementation. Enabling it with a null platform attempt factory would
+  // crash when the first platform DNS attempt is created.
+  const bool enable_platform_dns = false;
+#else
+  // Explicit nameservers must take precedence over the platform DNS APIs.
   const bool enable_platform_dns =
-      net::features::IsDnsPlatformSupported() &&
+      !dns_server_override_enable && net::features::IsDnsPlatformSupported() &&
       base::FeatureList::IsEnabled(kCronetEnableDnsPlatform);
+#endif
 
   if (enable_platform_dns || async_dns_enable || stale_dns_enable ||
-      host_resolver_rules_enable || disable_ipv6_on_wifi || is_network_bound ||
-      https_svcb_options) {
+      host_resolver_rules_enable || dns_server_override_enable ||
+      disable_ipv6_on_wifi || is_network_bound || https_svcb_options) {
     net::HostResolver::ManagerOptions host_resolver_manager_options;
     host_resolver_manager_options.insecure_dns_client_enabled =
         async_dns_enable;
+    host_resolver_manager_options.additional_types_via_insecure_dns_enabled =
+        use_dns_https_svcb_enable;
     host_resolver_manager_options.check_ipv6_on_wifi = !disable_ipv6_on_wifi;
     if (https_svcb_options) {
       host_resolver_manager_options.https_svcb_options = https_svcb_options;
+    }
+    // A network-bound resolver must obtain DNS servers for that Android
+    // network. Its v150 implementation rejects preconfigured DNS overrides,
+    // so the engine-level override applies only to the default context.
+    if (dns_server_override_enable && !is_network_bound) {
+      host_resolver_manager_options.insecure_dns_client_enabled = true;
+      // Completely ignore the system DNS configuration.
+      host_resolver_manager_options.dns_config_overrides =
+          net::DnsConfigOverrides::CreateOverridingEverythingWithDefaults();
+      // Override it with the caller-provided nameservers.
+      host_resolver_manager_options.dns_config_overrides.nameservers =
+          dns_server_override_nameservers;
+      // Disable Secure DNS so all queries use the configured nameservers.
+      host_resolver_manager_options.dns_config_overrides.secure_dns_mode =
+          net::SecureDnsMode::kOff;
+      host_resolver_manager_options.dns_config_overrides
+          .allow_dns_over_https_upgrade = false;
+      host_resolver_manager_options.dns_config_overrides.dns_over_https_config =
+          net::DnsOverHttpsConfig();  // Empty config, no DoH servers
     }
 
     if (enable_platform_dns) {
@@ -936,6 +1084,43 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
 
   if (mock_cert_verifier)
     context_builder->SetCertVerifier(std::move(mock_cert_verifier));
+
+  // Network-bound contexts must use Chromium's network-binding socket factory.
+  // cronet-go does not expose network handles, so custom dialers are installed
+  // only on the default context used by its C API.
+  if ((dialer || udp_dialer) &&
+      bound_network == net::handles::kInvalidNetworkHandle) {
+    net::CustomClientSocketFactory::DialerCallback tcp_dialer_callback;
+    net::CustomClientSocketFactory::UdpDialerCallback udp_dialer_callback;
+
+    if (dialer) {
+      auto dialer_copy = dialer;
+      auto* context_copy = dialer_context;
+      tcp_dialer_callback = base::BindRepeating(
+          [](intptr_t (*dialer)(void*, const char*, uint16_t), void* context,
+             const std::string& address, uint16_t port) -> intptr_t {
+            return dialer(context, address.c_str(), port);
+          },
+          dialer_copy, context_copy);
+    }
+
+    if (udp_dialer) {
+      auto udp_dialer_copy = udp_dialer;
+      auto* udp_context_copy = udp_dialer_context;
+      udp_dialer_callback = base::BindRepeating(
+          [](intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+             void* context, const std::string& address, uint16_t port,
+             char* out_local_address, uint16_t* out_local_port) -> intptr_t {
+            return dialer(context, address.c_str(), port, out_local_address,
+                          out_local_port);
+          },
+          udp_dialer_copy, udp_context_copy);
+    }
+
+    auto custom_factory = std::make_unique<net::CustomClientSocketFactory>(
+        std::move(tcp_dialer_callback), std::move(udp_dialer_callback));
+    context_builder->set_client_socket_factory(std::move(custom_factory));
+  }
   // TODO(mef): Use |config| to set cookies.
 }
 

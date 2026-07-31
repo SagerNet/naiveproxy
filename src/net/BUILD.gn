@@ -25,8 +25,6 @@ if (is_android) {
   import("//build/config/ios/bundle_data_from_filelist.gni")
 }
 
-enable_built_in_dns = use_blink
-
 # TODO(droger): Support client auth on iOS. See http://crbug.com/145954).
 #
 # Historically this was disabled because client auth required
@@ -959,6 +957,8 @@ component("net") {
     "shared_dictionary/shared_dictionary_transaction_outcome.h",
     "socket/client_socket_factory.cc",
     "socket/client_socket_factory.h",
+    "socket/custom_client_socket_factory.cc",
+    "socket/custom_client_socket_factory.h",
     "socket/client_socket_handle.cc",
     "socket/client_socket_handle.h",
     "socket/client_socket_pool.cc",
@@ -1337,6 +1337,7 @@ component("net") {
       "android/http_auth_negotiate_android.h",
       "android/keystore.h",
       "android/network_change_notifier_android.h",
+      "android/network_change_notifier_android_stub.cc",
       "android/network_change_notifier_delegate_android.h",
       "android/network_change_notifier_factory_android.h",
       "android/network_library_stub.cc",
@@ -1344,6 +1345,7 @@ component("net") {
       "android/traffic_stats.h",
       "cert/cert_verify_proc_android.h",
       "proxy_resolution/proxy_config_service_android.h",
+      "proxy_resolution/proxy_config_service_android_stub.cc",
     ]
   }
 

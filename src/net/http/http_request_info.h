@@ -149,6 +149,9 @@ struct NET_EXPORT HttpRequestInfo {
   // changing it to an optional and CHECK that it is set prior to use (see
   // https://chromium-review.git.corp.google.com/c/chromium/src/+/7612167/comment/05941166_0f11478f/).
   handles::NetworkHandle target_network = handles::kInvalidNetworkHandle;
+
+  // When true, force this request to use QUIC without TCP/HTTP fallback.
+  bool force_quic = false;
 };
 
 }  // namespace net

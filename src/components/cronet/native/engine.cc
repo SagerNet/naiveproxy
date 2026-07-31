@@ -4,6 +4,7 @@
 
 #include "components/cronet/native/engine.h"
 
+#include <optional>
 #include <unordered_set>
 #include <utility>
 
@@ -27,7 +28,20 @@
 #include "net/base/completion_once_callback.h"
 #include "net/base/hash_value.h"
 #include "net/base/proxy_delegate.h"
-#include "net/url_request/url_request_context.h"
+#include "net/cert/cert_verify_proc.h"
+#include "net/cert/cert_verify_proc_builtin.h"
+#include "net/cert/crl_set.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/do_nothing_ct_verifier.h"
+#include "net/cert/internal/system_trust_store.h"
+#include "net/cert/multi_threaded_cert_verifier.h"
+#include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
+#include "third_party/boringssl/src/pki/cert_errors.h"
+#include "third_party/boringssl/src/pki/parse_certificate.h"
+#include "third_party/boringssl/src/pki/parsed_certificate.h"
+#include "third_party/boringssl/src/pki/trust_store_collection.h"
+#include "third_party/boringssl/src/pki/trust_store_in_memory.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -291,6 +305,22 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
 
+  // Set custom dialer if provided.
+  if (dialer_) {
+    config->dialer = dialer_;
+    config->dialer_context = dialer_context_;
+    dialer_ = nullptr;
+    dialer_context_ = nullptr;
+  }
+
+  // Set custom UDP dialer if provided.
+  if (udp_dialer_) {
+    config->udp_dialer = udp_dialer_;
+    config->udp_dialer_context = udp_dialer_context_;
+    udp_dialer_ = nullptr;
+    udp_dialer_context_ = nullptr;
+  }
+
   for (const auto& public_key_pins : params->public_key_pins) {
     auto pkp = std::make_unique<URLRequestContextConfig::Pkp>(
         public_key_pins.host, public_key_pins.include_subdomains,
@@ -305,10 +335,11 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
     if (public_key_pins.pins_sha256.empty())
       return CheckResult(Cronet_RESULT_NULL_POINTER_SHA256_PINS);
     for (const auto& pin_sha256 : public_key_pins.pins_sha256) {
-      net::HashValue pin_hash;
-      if (!pin_hash.FromString(pin_sha256))
+      std::optional<net::HashValue> pin_hash =
+          net::HashValue::FromString(pin_sha256);
+      if (!pin_hash)
         return CheckResult(Cronet_RESULT_ILLEGAL_ARGUMENT_INVALID_PIN);
-      pkp->pin_hashes.push_back(pin_hash);
+      pkp->pin_hashes.push_back(std::move(*pin_hash));
     }
     config->pkp_list.push_back(std::move(pkp));
   }
@@ -375,20 +406,32 @@ Cronet_RESULT Cronet_EngineImpl::Shutdown() {
   init_completed_.Wait();
   // If not logging, this is a no-op.
   StopNetLog();
-  // Stop the engine.
-  base::AutoLock lock(lock_);
-  if (context_->IsOnNetworkThread()) {
-    return CheckResult(
-        Cronet_RESULT_ILLEGAL_STATE_CANNOT_SHUTDOWN_ENGINE_FROM_NETWORK_THREAD);
+  std::unique_ptr<StreamEngineImpl> stream_engine;
+  std::unique_ptr<CronetContext> context;
+  {
+    base::AutoLock lock(lock_);
+    // Another caller may have completed shutdown while this caller was
+    // waiting for initialization or NetLog shutdown.
+    if (!context_)
+      return CheckResult(Cronet_RESULT_SUCCESS);
+    if (context_->IsOnNetworkThread()) {
+      return CheckResult(
+          Cronet_RESULT_ILLEGAL_STATE_CANNOT_SHUTDOWN_ENGINE_FROM_NETWORK_THREAD);
+    }
+
+    if (!in_use_storage_path_.empty()) {
+      SharedEngineState::GetInstance()->UnmarkStoragePathInUse(
+          in_use_storage_path_);
+    }
+
+    stream_engine = std::move(stream_engine_);
+    context = std::move(context_);
   }
 
-  if (!in_use_storage_path_.empty()) {
-    SharedEngineState::GetInstance()->UnmarkStoragePathInUse(
-        in_use_storage_path_);
-  }
-
-  stream_engine_.reset();
-  context_.reset();
+  // CronetContext destruction joins the network thread. Do not hold the engine
+  // lock while joining: callbacks on that thread can re-enter the engine.
+  stream_engine.reset();
+  context.reset();
   return CheckResult(Cronet_RESULT_SUCCESS);
 }
 
@@ -483,6 +526,40 @@ void Cronet_EngineImpl::SetMockCertVerifierForTesting(
   mock_cert_verifier_ = std::move(mock_cert_verifier);
 }
 
+void Cronet_EngineImpl::SetDialer(
+    intptr_t (*dialer)(void*, const char*, uint16_t),
+    void* context) {
+  CHECK(!context_);
+  dialer_ = dialer;
+  dialer_context_ = context;
+}
+
+void Cronet_EngineImpl::SetUdpDialer(
+    intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
+    void* context) {
+  CHECK(!context_);
+  udp_dialer_ = dialer;
+  udp_dialer_context_ = context;
+}
+
+void Cronet_EngineImpl::CloseAllConnections() {
+  base::WaitableEvent done;
+  {  // Keep `context_` alive until the close task has been queued.
+    base::AutoLock lock(lock_);
+    if (!context_)
+      return;
+    if (context_->IsOnNetworkThread()) {
+      // Never close sessions while holding the engine lock on the network
+      // thread. Session callbacks can re-enter APIs that need this lock.
+      context_->CloseAllConnections(base::DoNothing());
+      return;
+    }
+    context_->CloseAllConnections(
+        base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&done)));
+  }
+  done.Wait();
+}
+
 stream_engine* Cronet_EngineImpl::GetBidirectionalStreamEngine() {
   init_completed_.Wait();
   return stream_engine_.get();
@@ -509,4 +586,177 @@ CRONET_EXPORT stream_engine* Cronet_Engine_GetStreamEngine(
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
   return engine_impl->GetBidirectionalStreamEngine();
+}
+
+CRONET_EXPORT void Cronet_Engine_CloseAllConnections(
+    Cronet_EnginePtr engine) {
+  static_cast<cronet::Cronet_EngineImpl*>(engine)->CloseAllConnections();
+}
+
+CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
+                                           Cronet_DialerFunc dialer,
+                                           void* context) {
+  cronet::Cronet_EngineImpl* engine_impl =
+      static_cast<cronet::Cronet_EngineImpl*>(engine);
+  engine_impl->SetDialer(dialer, context);
+}
+
+CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
+                                              Cronet_UdpDialerFunc dialer,
+                                              void* context) {
+  cronet::Cronet_EngineImpl* engine_impl =
+      static_cast<cronet::Cronet_EngineImpl*>(engine);
+  engine_impl->SetUdpDialer(dialer, context);
+}
+
+namespace {
+
+// A simple SystemTrustStore that only uses custom root certificates.
+class CustomRootSystemTrustStore : public net::SystemTrustStore {
+ public:
+  explicit CustomRootSystemTrustStore(
+      std::unique_ptr<bssl::TrustStoreInMemory> trust_store)
+      : trust_store_(std::move(trust_store)) {}
+
+  bssl::TrustStore* GetTrustStore() override { return trust_store_.get(); }
+
+  bool IsKnownRoot(const bssl::ParsedCertificate* cert) const override {
+    return trust_store_->Contains(cert);
+  }
+
+  bool IsKnownMtcAnchor(const bssl::MTCAnchor* anchor) const override {
+    return false;
+  }
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  net::PlatformTrustStore* GetPlatformTrustStore() override { return nullptr; }
+
+  bool IsLocallyTrustedRoot(
+      const bssl::ParsedCertificate* trust_anchor) override {
+    return false;
+  }
+
+  int64_t chrome_root_store_version() const override { return 0; }
+
+  std::optional<base::Time> mtc_metadata_update_time() const override {
+    return std::nullopt;
+  }
+
+  base::span<const net::ChromeRootCertConstraints> GetChromeRootConstraints(
+      const bssl::CertPathBuilderResultPath* path) const override {
+    return {};
+  }
+
+  const net::TrustStoreChrome::MtcAnchorExtraData* GetMTCAnchorData(
+      base::span<const uint8_t> log_id) const override {
+    return nullptr;
+  }
+
+  std::optional<int32_t> GetCrsRootIdForCert(
+      const bssl::CertPathBuilderResultPath* path) const override {
+    return std::nullopt;
+  }
+
+  bssl::TrustStore* eutl_trust_store() override {
+    return &empty_eutl_trust_store_;
+  }
+#endif
+
+ private:
+  std::unique_ptr<bssl::TrustStoreInMemory> trust_store_;
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  bssl::TrustStoreCollection empty_eutl_trust_store_;
+#endif
+};
+
+// A CertVerifyProcFactory that always returns the same fixed CertVerifyProc.
+class FixedCertVerifyProcFactory : public net::CertVerifyProcFactory {
+ public:
+  explicit FixedCertVerifyProcFactory(
+      scoped_refptr<net::CertVerifyProc> verify_proc)
+      : verify_proc_(std::move(verify_proc)) {}
+
+  scoped_refptr<net::CertVerifyProc> CreateCertVerifyProc(
+      scoped_refptr<net::CertNetFetcher> cert_net_fetcher,
+      const net::CertVerifyProc::ImplParams& impl_params,
+      const net::CertVerifyProc::InstanceParams& instance_params) override {
+    return verify_proc_;
+  }
+
+ protected:
+  ~FixedCertVerifyProcFactory() override = default;
+
+ private:
+  scoped_refptr<net::CertVerifyProc> verify_proc_;
+};
+
+}  // namespace
+
+CRONET_EXPORT void* Cronet_CreateCertVerifierWithRootCerts(
+    const char* pem_root_certs) {
+  cronet::EnsureInitialized();
+
+  if (!pem_root_certs || strlen(pem_root_certs) == 0) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: PEM data is empty";
+    return nullptr;
+  }
+
+  // Parse PEM certificates
+  size_t pem_len = strlen(pem_root_certs);
+  net::CertificateList certs = net::X509Certificate::CreateCertificateListFromBytes(
+      base::as_byte_span(std::string_view(pem_root_certs, pem_len)),
+      net::X509Certificate::FORMAT_AUTO);
+
+  if (certs.empty()) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid certificates found in PEM data";
+    return nullptr;
+  }
+
+  // Create a TrustStoreInMemory with the parsed certificates
+  auto trust_store = std::make_unique<bssl::TrustStoreInMemory>();
+
+  for (const auto& cert : certs) {
+    bssl::CertErrors errors;
+    auto parsed = bssl::ParsedCertificate::Create(
+        bssl::UpRef(cert->cert_buffer()),
+        net::x509_util::DefaultParseCertificateOptions(), &errors);
+    if (!parsed) {
+      LOG(WARNING) << "CreateCertVerifierWithRootCerts: Failed to parse certificate: "
+                   << errors.ToDebugString();
+      continue;
+    }
+    trust_store->AddTrustAnchor(std::move(parsed));
+  }
+
+  if (trust_store->IsEmpty()) {
+    LOG(ERROR) << "CreateCertVerifierWithRootCerts: No valid trust anchors could be parsed";
+    return nullptr;
+  }
+
+  // Create the SystemTrustStore with only custom roots
+  auto system_trust_store =
+      std::make_unique<CustomRootSystemTrustStore>(std::move(trust_store));
+
+  auto crl_set = net::CRLSet::BuiltinCRLSet();
+
+  // Create the CertVerifyProc with default settings and custom trust store
+  net::CertVerifyProc::InstanceParams instance_params;
+  scoped_refptr<net::CertVerifyProc> verify_proc = net::CreateCertVerifyProcBuiltin(
+      /*net_fetcher=*/nullptr,
+      std::move(crl_set),
+      std::make_unique<net::DoNothingCTVerifier>(),
+      base::MakeRefCounted<net::DefaultCTPolicyEnforcer>(),
+      std::move(system_trust_store),
+      instance_params,
+      /*time_tracker=*/std::nullopt);
+
+  // Create a factory that returns the same CertVerifyProc
+  auto verify_proc_factory =
+      base::MakeRefCounted<FixedCertVerifyProcFactory>(verify_proc);
+
+  // Create the MultiThreadedCertVerifier with both verify_proc and factory
+  auto* verifier = new net::MultiThreadedCertVerifier(
+      std::move(verify_proc), std::move(verify_proc_factory));
+
+  return verifier;
 }

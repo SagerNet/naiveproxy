@@ -7,13 +7,12 @@
 #include <tuple>
 
 #include "base/at_exit.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/notimplemented.h"
-#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
-#include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 
 // This file provides minimal "stub" implementations of the Cronet global-state
@@ -31,7 +30,17 @@ scoped_refptr<base::SingleThreadTaskRunner> InitializeAndCreateTaskRunner() {
   std::ignore = new base::AtExitManager;
 #endif
 
-  base::FeatureList::InitInstance(std::string(), std::string());
+  // Initialize CommandLine - required by many Chromium components
+  // (e.g., TrustStoreChrome uses CommandLine::HasSwitch)
+  // Use defensive check to avoid double initialization if host app already initialized it.
+  if (!base::CommandLine::InitializedForCurrentProcess()) {
+    base::CommandLine::Init(0, nullptr);
+  }
+
+  // Enable PartitionConnectionsByNetworkIsolationKey for -network-isolation-key
+  // header support in BidirectionalStream.
+  base::FeatureList::InitInstance("PartitionConnectionsByNetworkIsolationKey",
+                                  std::string());
 
   // Note that in component builds this ThreadPoolInstance will be shared with
   // the calling process, if it also depends on //base. In particular this means
@@ -65,17 +74,13 @@ void PostTaskToInitThread(const base::Location& posted_from,
 
 std::unique_ptr<net::ProxyConfigService> CreateProxyConfigService(
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner) {
-  return net::ProxyConfigService::CreateSystemProxyConfigService(
-      io_task_runner);
+  return nullptr;
 }
 
 std::unique_ptr<net::ProxyResolutionService> CreateProxyResolutionService(
     std::unique_ptr<net::ProxyConfigService> proxy_config_service,
     net::NetLog* net_log) {
-  return net::ConfiguredProxyResolutionService::CreateUsingSystemProxyResolver(
-      std::move(proxy_config_service),
-      /*host_resolver_for_override_rules=*/nullptr, net_log,
-      /*quick_check_enabled=*/true);
+  return nullptr;
 }
 
 std::string CreateDefaultUserAgent(const std::string& partial_user_agent) {

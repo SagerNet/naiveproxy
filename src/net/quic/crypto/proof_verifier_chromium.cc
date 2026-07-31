@@ -425,11 +425,9 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
     }
   }
 
-  if (result == OK &&
-      !verify_details_->cert_verify_result.is_issued_by_known_root &&
-      !ShouldAllowUnknownRootForHost(hostname_)) {
-    result = ERR_QUIC_CERT_ROOT_NOT_KNOWN;
-  }
+  // CertVerifyProc has already decided whether the configured trust store
+  // accepts the chain. A second known-root check here would reject roots
+  // supplied through Cronet's custom certificate verifier.
 
   verify_details_->is_fatal_cert_error =
       IsCertStatusError(cert_status) &&

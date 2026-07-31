@@ -144,7 +144,16 @@ assert_cpp20_default = true
 
 # Cronet disables PartitionAlloc to reduce its binary size (crbug.com/674570).
 # TODO(crbug.com/384669394): Consider enabling it instead.
-# use_partition_alloc_default = !is_cronet_build
+#
+# Enable PartitionAlloc only for OpenWRT (musl) and Windows builds
+# to avoid dependency on glibc-specific features.
+# Keep it disabled on iOS/macOS/Android as they don't need it and
+# iOS can't allocate the required 16GB virtual address space.
+if (current_os == "openwrt" || is_win) {
+  use_partition_alloc_default = true
+} else {
+  use_partition_alloc_default = false
+}
 
 # On Chromecast devices, some system libraries bypass the allocator shim and
 # call free() directly on memory not managed by PartitionAlloc. This flag

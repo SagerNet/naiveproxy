@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_CRONET_URL_REQUEST_CONTEXT_CONFIG_H_
 #define COMPONENTS_CRONET_URL_REQUEST_CONTEXT_CONFIG_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -180,6 +182,24 @@ struct URLRequestContextConfig {
   base::TimeDelta heartbeat_interval;
 
   const std::optional<cronet::proto::ProxyOptions> proxy_options;
+
+  // Custom TCP dialer callback. When set, this callback will be used to
+  // establish TCP connections instead of the default socket API.
+  // The callback takes (context, address, port) and returns:
+  //   - On success: connected socket fd (>= 0)
+  //   - On failure: negative net error code
+  intptr_t (*dialer)(void*, const char*, uint16_t) = nullptr;
+  void* dialer_context = nullptr;
+
+  // Custom UDP dialer callback. When set, this callback will be used to
+  // create UDP sockets instead of the default socket API.
+  // The callback takes (context, address, port, out_local_address,
+  // out_local_port) and returns:
+  //   - On success: socket fd (>= 0)
+  //   - On failure: negative net error code
+  intptr_t (*udp_dialer)(void*, const char*, uint16_t, char*, uint16_t*) =
+      nullptr;
+  void* udp_dialer_context = nullptr;
 
   static bool ExperimentalOptionsParsingIsAllowedToFail() {
     return DCHECK_IS_ON();

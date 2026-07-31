@@ -5,6 +5,7 @@
 #include "base/threading/platform_thread.h"
 
 #include <errno.h>
+#include <optional>
 #include <stddef.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -15,7 +16,6 @@
 #include "base/logging.h"
 #include "base/threading/platform_thread_internal_posix.h"
 #include "base/threading/thread_id_name_manager.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 
@@ -57,6 +57,10 @@ int ThreadTypeToNiceValue(const ThreadType thread_type) {
 
 bool CanSetThreadTypeToRealtimeAudio() {
   return false;
+}
+
+std::optional<ThreadType> GetCurrentEffectiveThreadTypeForPlatformForTest() {
+  return std::nullopt;
 }
 
 void SetCurrentThreadTypeImpl(ThreadType thread_type,

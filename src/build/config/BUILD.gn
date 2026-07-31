@@ -215,6 +215,10 @@ config("default_libs") {
       "pthread",
       "rt",
     ]
+    if (current_os == "linux") {
+      # glibc requires libm for math functions; musl includes them in libc
+      libs += [ "m" ]
+    }
   }
 }
 

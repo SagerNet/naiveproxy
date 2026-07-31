@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/files/file_path.h"
@@ -54,11 +55,14 @@
 #include "net/cookies/cookie_setting_override.h"
 #include "net/first_party_sets/first_party_set_metadata.h"
 #include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/file_net_log_observer.h"
 #include "net/log/net_log_util.h"
 #include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator_params.h"
+#include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
@@ -368,9 +372,10 @@ CronetContext::NetworkTasks::BuildDefaultURLRequestContext(
   context_config_->ConfigureURLRequestContextBuilder(&context_builder, this);
   SetSharedURLRequestContextBuilderConfig(&context_builder);
 
+  // Use direct connection (no proxy). This avoids creating background
+  // resources from system proxy monitoring that can't be cleaned up.
   context_builder.set_proxy_resolution_service(
-      cronet::CreateProxyResolutionService(std::move(proxy_config_service),
-                                           GetNetLog().net_log()));
+      net::ConfiguredProxyResolutionService::CreateDirect());
 
   if (context_config_->enable_network_quality_estimator) {
     std::unique_ptr<net::NetworkQualityEstimatorParams> nqe_params =
@@ -569,6 +574,34 @@ net::URLRequestContext* CronetContext::NetworkTasks::GetURLRequestContext(
   return contexts_[network].get();
 }
 
+void CronetContext::NetworkTasks::CloseAllConnections() {
+  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
+  // Closing a session can synchronously run request callbacks. Those callbacks
+  // may erase a disconnected network-bound context, so don't retain map
+  // iterators across CloseAllConnections().
+  std::vector<net::handles::NetworkHandle> networks;
+  networks.reserve(contexts_.size());
+  for (const auto& context_entry : contexts_) {
+    networks.push_back(context_entry.first);
+  }
+  for (net::handles::NetworkHandle network : networks) {
+    auto context_it = contexts_.find(network);
+    if (context_it == contexts_.end()) {
+      continue;
+    }
+    net::HttpTransactionFactory* transaction_factory =
+        context_it->second->http_transaction_factory();
+    if (!transaction_factory) {
+      continue;
+    }
+    net::HttpNetworkSession* session = transaction_factory->GetSession();
+    if (session) {
+      session->CloseAllConnections(net::ERR_ABORTED,
+                                   "CronetContext::CloseAllConnections()");
+    }
+  }
+}
+
 void CronetContext::NetworkTasks::MaybeDestroyURLRequestContext(
     net::handles::NetworkHandle network) {
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
@@ -628,6 +661,17 @@ net::URLRequestContext* CronetContext::GetURLRequestContext(
     net::handles::NetworkHandle network) {
   DCHECK(IsOnNetworkThread());
   return network_tasks_->GetURLRequestContext(network);
+}
+
+void CronetContext::CloseAllConnections(base::OnceClosure completion) {
+  PostTaskToNetworkThread(
+      FROM_HERE,
+      base::BindOnce(
+          [](NetworkTasks* network_tasks, base::OnceClosure completion) {
+            network_tasks->CloseAllConnections();
+            std::move(completion).Run();
+          },
+          base::Unretained(network_tasks_), std::move(completion)));
 }
 
 void CronetContext::PostTaskToNetworkThread(const base::Location& posted_from,

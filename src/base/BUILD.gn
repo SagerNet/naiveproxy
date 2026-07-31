@@ -1207,10 +1207,18 @@ component("base") {
       "android/content_uri_utils_stub.cc",
       "android/device_info.h",
       "android/device_info_stub.cc",
+      "android/path_utils.h",
+      "android/path_utils_stub.cc",
+      "android/input_hint_checker.h",
+      "android/input_hint_checker_stub.cc",
+      "android/java_runtime.h",
+      "android/java_runtime_stub.cc",
       "android/pmf_utils.cc",
       "android/pmf_utils.h",
       "android/pre_freeze_background_memory_trimmer.cc",
       "android/pre_freeze_background_memory_trimmer.h",
+      "android/self_compaction_manager.cc",
+      "android/self_compaction_manager.h",
       "android/virtual_document_path.cc",
       "android/virtual_document_path.h",
       "android/yield_to_looper_checker.cc",
@@ -1224,6 +1232,8 @@ component("base") {
       "files/scoped_file_android.cc",
       "message_loop/message_pump_android.cc",
       "message_loop/message_pump_android.h",
+      "os_compat_android.cc",
+      "os_compat_android.h",
       "profiler/stack_sampler_android.cc",
       "system/sys_info_android.cc",
       "threading/platform_thread_android_stub.cc",
@@ -1241,6 +1251,15 @@ component("base") {
       "process/process_metrics_linux.cc",
       "system/sys_info_linux.cc",
       "threading/platform_thread_metrics_linux.cc",
+
+      # Android-specific shared memory implementation.
+      "memory/platform_shared_memory_mapper_android.cc",
+      "memory/platform_shared_memory_region_android.cc",
+    ]
+
+    sources += [
+      "android/linker/ashmem.cc",
+      "android/linker/ashmem.h",
     ]
 
     deps += [
@@ -1342,8 +1361,6 @@ component("base") {
       "android/trace_event_binding.h",
       "android/unguessable_token_android.cc",
       "android/unguessable_token_android.h",
-    ]
-    deps += [
     ]
   }
   if (is_android || is_robolectric) {
@@ -2018,8 +2035,17 @@ component("base") {
       "Security.framework",
     ]
 
-    if (!is_ios || !use_blink) {
+    # tvOS doesn't have mach_msg available, so use POSIX implementation
+    if (!is_ios || (!use_blink && target_platform != "tvos")) {
       sources += [ "synchronization/waitable_event_apple.cc" ]
+    }
+
+    # tvOS needs POSIX waitable_event when not using blink
+    if (is_ios && !use_blink && target_platform == "tvos") {
+      sources += [
+        "synchronization/waitable_event_posix.cc",
+        "synchronization/waitable_event_watcher_posix.cc",
+      ]
     }
   }
 
@@ -2047,13 +2073,8 @@ component("base") {
       "mac/code_signature_spi.h",
       "mac/info_plist_data.h",
       "mac/info_plist_data.mm",
-      "mac/launch_application.h",
-      "mac/launch_application.mm",
-      "mac/launch_services_spi.h",
       "mac/launchd.cc",
       "mac/launchd.h",
-      "mac/login_util.cc",
-      "mac/login_util.h",
       "mac/mac_util.h",
       "mac/mac_util.mm",
       "mac/os_crash_dumps.cc",
@@ -2100,6 +2121,16 @@ component("base") {
       "synchronization/waitable_event_watcher_mac.cc",
       "system/sys_info_mac.mm",
     ]
+
+    if (!is_cronet_build) {
+      sources += [
+        "mac/launch_application.h",
+        "mac/launch_application.mm",
+        "mac/launch_services_spi.h",
+        "mac/login_util.cc",
+        "mac/login_util.h",
+      ]
+    }
 
     deps += [ ":plist_size_buildflags" ]
 
@@ -2204,8 +2235,13 @@ component("base") {
         sources += [ "process/launch_ios.cc" ]
       }
     } else {
+      # tvOS doesn't support power_monitor_device_source_ios.mm
+      if (target_platform == "tvos") {
+        sources += [ "power_monitor/power_monitor_device_source_stub.cc" ]
+      } else {
+        sources += [ "power_monitor/power_monitor_device_source_ios.mm" ]
+      }
       sources += [
-        "power_monitor/power_monitor_device_source_ios.mm",
         "process/launch_ios.cc",
         "process/memory_stubs.cc",
         "process/process_stubs.cc",
