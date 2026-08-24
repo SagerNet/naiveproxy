@@ -140,14 +140,18 @@ PendingStream::PendingStream(QuicStreamId id, QuicSession& session)
                                                  session.version()) ==
                         BIDIRECTIONAL),
       connection_flow_controller_(session.flow_controller()),
-      flow_controller_(&session, id,
-                       /*is_connection_flow_controller*/ false,
-                       GetReceivedFlowControlWindow(&session, id),
-                       GetInitialStreamFlowControlWindowToSend(&session, id),
-                       kStreamReceiveWindowLimit,
-                       session.flow_controller()->auto_tune_receive_window(),
-                       session.flow_controller()),
-      sequencer_(this),
+      flow_controller_(
+          &session, id,
+          /*is_connection_flow_controller*/ false,
+          GetReceivedFlowControlWindow(&session, id),
+          GetInitialStreamFlowControlWindowToSend(&session, id),
+          std::max(kStreamReceiveWindowLimit,
+                   GetInitialStreamFlowControlWindowToSend(&session, id)),
+          session.flow_controller()->auto_tune_receive_window(),
+          session.flow_controller()),
+      sequencer_(this,
+                 std::max(kStreamReceiveWindowLimit,
+                          GetInitialStreamFlowControlWindowToSend(&session, id))),
       creation_time_(session.GetClock()->ApproximateNow()) {
   if (is_bidirectional_) {
     QUIC_CODE_COUNT_N(quic_pending_stream, 3, 3);
@@ -361,7 +365,8 @@ std::optional<QuicFlowController> FlowController(QuicStreamId id,
       /*is_connection_flow_controller*/ false,
       GetReceivedFlowControlWindow(session, id),
       GetInitialStreamFlowControlWindowToSend(session, id),
-      kStreamReceiveWindowLimit,
+      std::max(kStreamReceiveWindowLimit,
+               GetInitialStreamFlowControlWindowToSend(session, id)),
       session->flow_controller()->auto_tune_receive_window(),
       session->flow_controller());
 }
@@ -370,9 +375,13 @@ std::optional<QuicFlowController> FlowController(QuicStreamId id,
 
 QuicStream::QuicStream(QuicStreamId id, QuicSession* session, bool is_static,
                        StreamType type)
-    : QuicStream(id, session, QuicStreamSequencer(this), is_static, type, 0,
-                 false, FlowController(id, session, type),
-                 session->flow_controller(), QuicTime::Delta::Zero()) {}
+    : QuicStream(
+          id, session,
+          QuicStreamSequencer(
+              this, std::max(kStreamReceiveWindowLimit,
+                             GetInitialStreamFlowControlWindowToSend(session, id))),
+          is_static, type, 0, false, FlowController(id, session, type),
+          session->flow_controller(), QuicTime::Delta::Zero()) {}
 
 QuicStream::QuicStream(QuicStreamId id, QuicSession* session,
                        QuicStreamSequencer sequencer, bool is_static,

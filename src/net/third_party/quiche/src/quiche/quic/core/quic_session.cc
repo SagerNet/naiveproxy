@@ -183,8 +183,9 @@ QuicSession::QuicSession(
           connection->version().IsIetfQuic() ? 0
                                              : kMinimumFlowControlSendWindow,
           config.GetInitialSessionFlowControlWindowToSend(),
-          kSessionReceiveWindowLimit, perspective() == Perspective::IS_SERVER,
-          nullptr),
+          std::max(kSessionReceiveWindowLimit,
+                   config.GetInitialSessionFlowControlWindowToSend()),
+          perspective() == Perspective::IS_SERVER, nullptr),
       control_frame_manager_(this),
       datagram_queue_(this, std::move(datagram_observer)),
       is_configured_(false),
