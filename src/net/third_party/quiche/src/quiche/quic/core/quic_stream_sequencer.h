@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 
+#include "quiche/quic/core/quic_constants.h"
 #include "quiche/quic/core/quic_packets.h"
 #include "quiche/quic/core/quic_stream_sequencer_buffer.h"
 #include "quiche/quic/core/quic_types.h"
@@ -54,7 +55,9 @@ class QUICHE_EXPORT QuicStreamSequencer final {
     virtual ParsedQuicVersion version() const = 0;
   };
 
-  explicit QuicStreamSequencer(StreamInterface* quic_stream);
+  explicit QuicStreamSequencer(
+      StreamInterface* quic_stream,
+      QuicByteCount max_buffer_capacity = kStreamReceiveWindowLimit);
   QuicStreamSequencer(const QuicStreamSequencer&) = delete;
   QuicStreamSequencer(QuicStreamSequencer&&) = default;
   QuicStreamSequencer& operator=(const QuicStreamSequencer&) = delete;
