@@ -71,9 +71,11 @@ CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
 // context: User-provided context pointer passed to Cronet_Engine_SetUdpDialer.
 // address: IP address string (e.g. "1.2.3.4" or "::1").
 // port: Port number.
-// out_local_address: Output buffer for local IP address (caller provides buffer,
+// out_local_address: Output buffer for local IP address (caller provides
+// buffer,
 //                    should be at least 46 bytes for INET6_ADDRSTRLEN).
 // out_local_port: Output pointer for local port number.
+// out_socket_id: Opaque identifier passed to on_close; zero skips notification.
 // Returns: socket fd on success, negative net error code on failure.
 // The returned socket can be:
 //   - AF_INET/AF_INET6 SOCK_DGRAM: Standard UDP socket
@@ -83,7 +85,10 @@ typedef intptr_t (*Cronet_UdpDialerFunc)(void* context,
                                          const char* address,
                                          uint16_t port,
                                          char* out_local_address,
-                                         uint16_t* out_local_port);
+                                         uint16_t* out_local_port,
+                                         uint64_t* out_socket_id);
+
+typedef void (*Cronet_UdpSocketCloseFunc)(uint64_t socket_id);
 
 // Sets a custom dialer for UDP sockets.
 // When set, the engine will use this callback to create UDP sockets
@@ -92,9 +97,11 @@ typedef intptr_t (*Cronet_UdpDialerFunc)(void* context,
 // dialer: The callback function to use for UDP sockets, or nullptr to
 //         disable custom UDP dialing.
 // context: User-provided context pointer that will be passed to the dialer.
-CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
-                                              Cronet_UdpDialerFunc dialer,
-                                              void* context);
+CRONET_EXPORT void Cronet_Engine_SetUdpDialer(
+    Cronet_EnginePtr engine,
+    Cronet_UdpDialerFunc dialer,
+    void* context,
+    Cronet_UdpSocketCloseFunc on_close);
 
 // Closes all connections managed by the engine's network session.
 // This includes socket pools, HTTP stream pool, SPDY session pool,

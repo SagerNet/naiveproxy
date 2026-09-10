@@ -146,19 +146,10 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   }
 
   void Close() override {
-    if (connected_) {
-#if BUILDFLAG(IS_WIN)
-      if (socket_) {
-        socket_->Close();
-        socket_.reset();
-      }
-#else
-      if (socket_) {
-        socket_->Close();
-        socket_.reset();
-      }
-#endif
-      connected_ = false;
+    connected_ = false;
+    socket_.reset();
+    if (on_close_) {
+      std::move(on_close_).Run();
     }
   }
 
@@ -223,9 +214,10 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     char local_addr_buf[kLocalAddressBufferSize] = {0};
     uint16_t local_port = 0;
 
-    intptr_t result =
-        dialer_.Run(address_string, port, local_addr_buf, &local_port);
+    intptr_t result = dialer_.Run(address_string, port, local_addr_buf,
+                                  &local_port, &on_close_);
     if (result < 0) {
+      Close();
       return static_cast<int>(result);
     }
 
@@ -261,6 +253,7 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     int rv = socket_->AdoptUnconnectedSocket(socket_fd);
 #endif
     if (rv != OK) {
+      Close();
       return rv;
     }
 
@@ -505,6 +498,7 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   }
 
   CustomClientSocketFactory::UdpDialerCallback dialer_;
+  base::OnceClosure on_close_;
   NetLogWithSource net_log_;
 
 #if BUILDFLAG(IS_WIN)

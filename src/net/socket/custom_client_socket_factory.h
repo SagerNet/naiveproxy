@@ -46,7 +46,8 @@ class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
       base::RepeatingCallback<intptr_t(const std::string& address,
                                        uint16_t port,
                                        char* out_local_address,
-                                       uint16_t* out_local_port)>;
+                                       uint16_t* out_local_port,
+                                       base::OnceClosure* on_close)>;
 
   CustomClientSocketFactory(DialerCallback tcp_dialer,
                             UdpDialerCallback udp_dialer);

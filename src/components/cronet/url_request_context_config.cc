@@ -1108,13 +1108,22 @@ void URLRequestContextConfig::ConfigureURLRequestContextBuilder(
       auto udp_dialer_copy = udp_dialer;
       auto* udp_context_copy = udp_dialer_context;
       udp_dialer_callback = base::BindRepeating(
-          [](intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
-             void* context, const std::string& address, uint16_t port,
-             char* out_local_address, uint16_t* out_local_port) -> intptr_t {
-            return dialer(context, address.c_str(), port, out_local_address,
-                          out_local_port);
+          [](intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*,
+                                uint64_t*),
+             void* context, void (*on_close)(uint64_t),
+             const std::string& address, uint16_t port, char* out_local_address,
+             uint16_t* out_local_port,
+             base::OnceClosure* close_callback) -> intptr_t {
+            uint64_t socket_id = 0;
+            intptr_t result =
+                dialer(context, address.c_str(), port, out_local_address,
+                       out_local_port, &socket_id);
+            if (socket_id != 0 && on_close) {
+              *close_callback = base::BindOnce(on_close, socket_id);
+            }
+            return result;
           },
-          udp_dialer_copy, udp_context_copy);
+          udp_dialer_copy, udp_context_copy, udp_socket_close);
     }
 
     auto custom_factory = std::make_unique<net::CustomClientSocketFactory>(
