@@ -66,9 +66,14 @@ class Cronet_EngineImpl : public Cronet_Engine {
                  void* context);
 
   // Set custom dialer for UDP sockets. Must be called before StartWithParams.
-  void SetUdpDialer(
-      intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
-      void* context);
+  void SetUdpDialer(intptr_t (*dialer)(void*,
+                                       const char*,
+                                       uint16_t,
+                                       char*,
+                                       uint16_t*,
+                                       uint64_t*),
+                    void* context,
+                    void (*on_close)(uint64_t));
 
   // Close all connections managed by the engine's network session.
   void CloseAllConnections();
@@ -124,9 +129,14 @@ class Cronet_EngineImpl : public Cronet_Engine {
   void* dialer_context_ = nullptr;
 
   // Custom dialer for UDP sockets. Only valid until StartWithParams.
-  intptr_t (*udp_dialer_)(void*, const char*, uint16_t, char*, uint16_t*) =
-      nullptr;
+  intptr_t (*udp_dialer_)(void*,
+                          const char*,
+                          uint16_t,
+                          char*,
+                          uint16_t*,
+                          uint64_t*) = nullptr;
   void* udp_dialer_context_ = nullptr;
+  void (*udp_socket_close_)(uint64_t) = nullptr;
 
   // Stores registered RequestFinishedInfoListeners with their associated
   // Executors.

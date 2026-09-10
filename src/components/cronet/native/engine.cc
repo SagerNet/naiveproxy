@@ -317,8 +317,10 @@ Cronet_RESULT Cronet_EngineImpl::StartWithParams(
   if (udp_dialer_) {
     config->udp_dialer = udp_dialer_;
     config->udp_dialer_context = udp_dialer_context_;
+    config->udp_socket_close = udp_socket_close_;
     udp_dialer_ = nullptr;
     udp_dialer_context_ = nullptr;
+    udp_socket_close_ = nullptr;
   }
 
   for (const auto& public_key_pins : params->public_key_pins) {
@@ -534,12 +536,18 @@ void Cronet_EngineImpl::SetDialer(
   dialer_context_ = context;
 }
 
-void Cronet_EngineImpl::SetUdpDialer(
-    intptr_t (*dialer)(void*, const char*, uint16_t, char*, uint16_t*),
-    void* context) {
+void Cronet_EngineImpl::SetUdpDialer(intptr_t (*dialer)(void*,
+                                                        const char*,
+                                                        uint16_t,
+                                                        char*,
+                                                        uint16_t*,
+                                                        uint64_t*),
+                                     void* context,
+                                     void (*on_close)(uint64_t)) {
   CHECK(!context_);
   udp_dialer_ = dialer;
   udp_dialer_context_ = context;
+  udp_socket_close_ = on_close;
 }
 
 void Cronet_EngineImpl::CloseAllConnections() {
@@ -601,12 +609,14 @@ CRONET_EXPORT void Cronet_Engine_SetDialer(Cronet_EnginePtr engine,
   engine_impl->SetDialer(dialer, context);
 }
 
-CRONET_EXPORT void Cronet_Engine_SetUdpDialer(Cronet_EnginePtr engine,
-                                              Cronet_UdpDialerFunc dialer,
-                                              void* context) {
+CRONET_EXPORT void Cronet_Engine_SetUdpDialer(
+    Cronet_EnginePtr engine,
+    Cronet_UdpDialerFunc dialer,
+    void* context,
+    Cronet_UdpSocketCloseFunc on_close) {
   cronet::Cronet_EngineImpl* engine_impl =
       static_cast<cronet::Cronet_EngineImpl*>(engine);
-  engine_impl->SetUdpDialer(dialer, context);
+  engine_impl->SetUdpDialer(dialer, context, on_close);
 }
 
 namespace {
