@@ -59,7 +59,7 @@
 // want to be defining special sections inside user's executables which use our headers.
 //
 
-#if defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__))
+#if defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__) && !defined(__mips_o32))
 
 #  define _LIBCPP_CAN_DETECT_OVERRIDDEN_FUNCTION 1
 
@@ -153,11 +153,11 @@ _LIBCPP_END_NAMESPACE_STD
 
 #  endif // __has_feature(ptrauth_calls)
 
-#else // defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__))
+#else // defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__) && !defined(__mips_o32))
 
 #  define _LIBCPP_CAN_DETECT_OVERRIDDEN_FUNCTION 0
 #  define OVERRIDABLE_FUNCTION [[gnu::weak]]
 
-#endif // defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__))
+#endif // defined(_LIBCPP_OBJECT_FORMAT_MACHO) || (defined(_LIBCPP_OBJECT_FORMAT_ELF) && !defined(__NVPTX__) && !defined(__mips_o32))
 
 #endif // _LIBCPP_SRC_INCLUDE_OVERRIDABLE_FUNCTION_H
