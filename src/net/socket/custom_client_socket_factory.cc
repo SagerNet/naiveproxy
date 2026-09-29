@@ -20,6 +20,12 @@
 #include <sys/un.h>
 #include <unistd.h>
 #endif
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+#include <sys/event.h>
+
+#include "base/files/scoped_file.h"
+#include "base/posix/eintr_wrapper.h"
+#endif
 #include "base/numerics/byte_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
@@ -119,7 +125,14 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     if (is_framed_stream_) {
       return DoFramedRead(buf, buf_len, std::move(callback));
     }
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+    return CheckReceiveShutdown(socket_->Read(
+        buf, buf_len,
+        base::BindOnce(&ConnectedDatagramClientSocket::OnDatagramReadComplete,
+                       base::Unretained(this), std::move(callback))));
+#else
     return socket_->Read(buf, buf_len, std::move(callback));
+#endif
   }
 
   base::expected<DatagramsMetadata, Error> ReadMultiple(
@@ -278,6 +291,36 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     connected_ = true;
     return OK;
   }
+
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+  // After shutdown(SHUT_RD) or a NetworkExtension flow-divert close, XNU and
+  // the BSDs complete every read on a datagram socket with 0 bytes instead of
+  // blocking; EVFILT_READ reporting EV_EOF is what distinguishes this from an
+  // empty datagram.
+  int CheckReceiveShutdown(int rv) {
+    if (rv != 0) {
+      return rv;
+    }
+    base::ScopedFD kqueue_fd(kqueue());
+    if (!kqueue_fd.is_valid()) {
+      return rv;
+    }
+    struct kevent change;
+    EV_SET(&change, socket_->socket_fd(), EVFILT_READ, EV_ADD, 0, 0, nullptr);
+    struct kevent event;
+    const struct timespec timeout = {};
+    if (HANDLE_EINTR(kevent(kqueue_fd.get(), &change, 1, &event, 1,
+                            &timeout)) == 1 &&
+        (event.flags & EV_EOF)) {
+      return ERR_CONNECTION_CLOSED;
+    }
+    return rv;
+  }
+
+  void OnDatagramReadComplete(CompletionOnceCallback callback, int rv) {
+    std::move(callback).Run(CheckReceiveShutdown(rv));
+  }
+#endif
 
   int DoFramedRead(IOBuffer* buf,
                    int buf_len,
