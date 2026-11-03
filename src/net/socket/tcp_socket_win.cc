@@ -20,6 +20,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/notimplemented.h"
 #include "base/strings/string_util.h"
+#include "base/synchronization/lock.h"
 #include "base/win/windows_version.h"
 #include "net/base/address_list.h"
 #include "net/base/features.h"
@@ -112,12 +113,16 @@ bool UseTcpPortRandomization() {
 // [crbug.com/40744069] This function and the two below are used to track
 // metrics on port reuse so that when SO_RANDOMIZE_PORT is enabled on windows
 // we will know if the distribution skews in a way likely to cause errors.
-std::map<std::string, base::Time>& GetLocalEndPointToLastSocketCloseTimeMap() {
-  static base::NoDestructor<std::map<std::string, base::Time>> map;
-  return *map;
+struct SocketReuseMetrics {
+  base::Lock lock;
+  std::map<std::string, base::Time> last_close_times GUARDED_BY(lock);
+};
+
+SocketReuseMetrics& GetSocketReuseMetrics() {
+  static base::NoDestructor<SocketReuseMetrics> metrics;
+  return *metrics;
 }
 
-// See comment on GetLocalEndPointToLastSocketCloseTimeMap.
 void RecordSocketConnectForReuseMetrics(TCPSocketWin* socket, bool success) {
   if (!base::FeatureList::IsEnabled(features::kTcpPortReuseMetricsWin)) {
     return;
@@ -128,25 +133,19 @@ void RecordSocketConnectForReuseMetrics(TCPSocketWin* socket, bool success) {
       local_address.port() == 0) {
     return;
   }
+  const std::string key = local_address.ToString();
+  auto& metrics = GetSocketReuseMetrics();
   base::Time last_closed_after_successful_open;
-  if (success) {
-    // If the port was successfully opened, then we should clear the last closed
-    // time and wait for it to be closed again.
-    const auto node = GetLocalEndPointToLastSocketCloseTimeMap().extract(
-        local_address.ToString());
-    if (!node) {
-      return;
-    }
-    last_closed_after_successful_open = node.mapped();
-  } else {
-    // If the port was not successfully opened, then we should just read the
-    // last closed time without clearing it so we can measure from last success.
-    const auto it = GetLocalEndPointToLastSocketCloseTimeMap().find(
-        local_address.ToString());
-    if (it == GetLocalEndPointToLastSocketCloseTimeMap().end()) {
+  {
+    base::AutoLock auto_lock(metrics.lock);
+    const auto it = metrics.last_close_times.find(key);
+    if (it == metrics.last_close_times.end()) {
       return;
     }
     last_closed_after_successful_open = it->second;
+    if (success) {
+      metrics.last_close_times.erase(it);
+    }
   }
   std::string ip_address_type = "Other";
   if (local_address.address().IsLoopback()) {
@@ -161,7 +160,6 @@ void RecordSocketConnectForReuseMetrics(TCPSocketWin* socket, bool success) {
       base::Time::Now() - last_closed_after_successful_open);
 }
 
-// See comment on GetLocalEndPointToLastSocketCloseTimeMap.
 void RecordSocketCloseForReuseMetrics(TCPSocketWin* socket) {
   if (!base::FeatureList::IsEnabled(features::kTcpPortReuseMetricsWin)) {
     return;
@@ -172,10 +170,10 @@ void RecordSocketCloseForReuseMetrics(TCPSocketWin* socket) {
       local_address.port() == 0) {
     return;
   }
-  // If the map already contains an entry for `local_address` then the last open
-  // was unsuccessful and we should reuse the last close time instead.
-  GetLocalEndPointToLastSocketCloseTimeMap().try_emplace(
-      local_address.ToString(), base::Time::Now());
+  const std::string key = local_address.ToString();
+  auto& metrics = GetSocketReuseMetrics();
+  base::AutoLock auto_lock(metrics.lock);
+  metrics.last_close_times.try_emplace(key, base::Time::Now());
 }
 
 }  // namespace
