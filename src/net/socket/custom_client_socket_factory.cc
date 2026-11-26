@@ -48,6 +48,7 @@
 #include "net/socket/next_proto.h"
 #include "net/socket/read_multiple_emulator.h"
 #include "net/socket/socket_descriptor.h"
+#include "net/socket/socket_tag.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/tcp_socket.h"
 #include "net/socket/udp_client_socket.h"
