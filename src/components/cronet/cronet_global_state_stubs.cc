@@ -39,8 +39,9 @@ scoped_refptr<base::SingleThreadTaskRunner> InitializeAndCreateTaskRunner() {
 
   // Enable PartitionConnectionsByNetworkIsolationKey for -network-isolation-key
   // header support in BidirectionalStream.
-  base::FeatureList::InitInstance("PartitionConnectionsByNetworkIsolationKey",
-                                  std::string());
+  base::FeatureList::InitInstance(
+      "PartitionConnectionsByNetworkIsolationKey,AsyncQuicSession",
+      std::string());
 
   // Note that in component builds this ThreadPoolInstance will be shared with
   // the calling process, if it also depends on //base. In particular this means

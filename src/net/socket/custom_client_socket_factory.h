@@ -8,16 +8,20 @@
 #include <stdint.h>
 
 #include <memory>
+#include <set>
 
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/net_export.h"
 #include "net/socket/client_socket_factory.h"
 
 namespace net {
 
-// A ClientSocketFactory that uses a custom dialer callback for TCP connections.
-// When the dialer is set, CreateTransportClientSocket will call the callback
-// to get a connected socket file descriptor instead of creating a new socket.
+// A ClientSocketFactory that uses custom dialer callbacks for TCP and UDP
+// sockets. Asynchronous connects run the callbacks on a blocking ThreadPool
+// worker and adopt the returned socket file descriptor on the calling sequence.
 class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
  public:
   // Callback type for custom TCP dialer.
@@ -49,6 +53,16 @@ class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
                                        uint16_t* out_local_port,
                                        base::OnceClosure* on_close)>;
 
+  class PendingConnect {
+   public:
+    virtual void CancelPendingConnect() = 0;
+
+   protected:
+    virtual ~PendingConnect() = default;
+  };
+
+  class DialQueue;
+
   CustomClientSocketFactory(DialerCallback tcp_dialer,
                             UdpDialerCallback udp_dialer);
   ~CustomClientSocketFactory() override;
@@ -78,9 +92,16 @@ class NET_EXPORT CustomClientSocketFactory : public ClientSocketFactory {
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config) override;
 
+  void AddPendingConnect(PendingConnect* pending_connect);
+  void RemovePendingConnect(PendingConnect* pending_connect);
+
  private:
   DialerCallback tcp_dialer_;
   UdpDialerCallback udp_dialer_;
+  scoped_refptr<DialQueue> dial_queue_;
+  std::set<raw_ptr<PendingConnect>> pending_connects_;
+
+  base::WeakPtrFactory<CustomClientSocketFactory> weak_factory_{this};
 };
 
 }  // namespace net

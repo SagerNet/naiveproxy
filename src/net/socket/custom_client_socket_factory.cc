@@ -5,11 +5,21 @@
 #include "net/socket/custom_client_socket_factory.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "base/containers/circular_deque.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
+#include "base/thread_annotations.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -19,12 +29,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+#include "base/posix/eintr_wrapper.h"
 #endif
 #if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
 #include <sys/event.h>
 
 #include "base/files/scoped_file.h"
-#include "base/posix/eintr_wrapper.h"
 #endif
 #include "base/numerics/byte_conversions.h"
 #include "net/base/io_buffer.h"
@@ -47,10 +58,220 @@
 
 namespace net {
 
+class CustomClientSocketFactory::DialQueue
+    : public base::RefCountedThreadSafe<DialQueue> {
+ public:
+  DialQueue() = default;
+  DialQueue(const DialQueue&) = delete;
+  DialQueue& operator=(const DialQueue&) = delete;
+
+  void Post(base::OnceClosure task, bool limited) {
+    {
+      base::AutoLock lock(lock_);
+      if (limited) {
+        if (limited_workers_ == kMaxConcurrentDials) {
+          tasks_.push_back(std::move(task));
+          return;
+        }
+        ++limited_workers_;
+      }
+      ++workers_;
+    }
+    if (!base::ThreadPool::PostTask(
+            FROM_HERE,
+            {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+            base::BindOnce(&DialQueue::Run, base::WrapRefCounted(this),
+                           std::move(task), limited))) {
+      base::AutoLock lock(lock_);
+      FinishWorkerLocked(limited);
+    }
+  }
+
+  void WaitForIdle() {
+    base::AutoLock lock(lock_);
+    while (workers_ != 0) {
+      idle_.Wait();
+    }
+  }
+
+ private:
+  friend class base::RefCountedThreadSafe<DialQueue>;
+  ~DialQueue() = default;
+
+  static constexpr size_t kMaxConcurrentDials = 16;
+
+  void Run(base::OnceClosure task, bool limited) {
+    while (true) {
+      std::move(task).Run();
+      base::AutoLock lock(lock_);
+      if (!limited || tasks_.empty()) {
+        FinishWorkerLocked(limited);
+        return;
+      }
+      task = std::move(tasks_.front());
+      tasks_.pop_front();
+    }
+  }
+
+  void FinishWorkerLocked(bool limited) EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+    if (limited) {
+      --limited_workers_;
+    }
+    if (--workers_ == 0) {
+      idle_.Broadcast();
+    }
+  }
+
+  base::Lock lock_;
+  base::ConditionVariable idle_{&lock_};
+  size_t workers_ GUARDED_BY(lock_) = 0;
+  size_t limited_workers_ GUARDED_BY(lock_) = 0;
+  base::circular_deque<base::OnceClosure> tasks_ GUARDED_BY(lock_);
+};
+
 namespace {
 
 // INET6_ADDRSTRLEN is 46 which is enough for any IPv4 or IPv6 address string.
 constexpr size_t kLocalAddressBufferSize = 46;
+
+class DialResult {
+ public:
+  DialResult() = default;
+  DialResult(const DialResult&) = delete;
+  DialResult& operator=(const DialResult&) = delete;
+  DialResult(DialResult&& other) { *this = std::move(other); }
+  DialResult& operator=(DialResult&& other) {
+    Reset();
+    rv = std::exchange(other.rv, ERR_FAILED);
+    socket = std::exchange(other.socket, kInvalidSocket);
+    local_address = std::move(other.local_address);
+    local_port = std::exchange(other.local_port, 0);
+    on_close = std::move(other.on_close);
+    return *this;
+  }
+  ~DialResult() { Reset(); }
+
+  void SetDialerResult(intptr_t result) {
+    if (result >= 0) {
+      rv = OK;
+      socket = static_cast<SocketDescriptor>(result);
+    } else {
+      rv = static_cast<int>(result);
+    }
+  }
+
+  SocketDescriptor TakeSocket() {
+    return std::exchange(socket, kInvalidSocket);
+  }
+
+  void Reset() {
+    if (socket != kInvalidSocket) {
+#if BUILDFLAG(IS_WIN)
+      closesocket(socket);
+#else
+      IGNORE_EINTR(close(socket));
+#endif
+      socket = kInvalidSocket;
+    }
+    if (on_close) {
+      std::move(on_close).Run();
+    }
+  }
+
+  int rv = ERR_FAILED;
+  SocketDescriptor socket = kInvalidSocket;
+  std::string local_address;
+  uint16_t local_port = 0;
+  base::OnceClosure on_close;
+};
+
+class PendingDial : public base::RefCountedThreadSafe<PendingDial> {
+ public:
+  using DialCallback = base::OnceCallback<DialResult()>;
+
+  static scoped_refptr<PendingDial> Start(
+      CustomClientSocketFactory::DialQueue* dial_queue,
+      const IPEndPoint& address,
+      DialCallback dial,
+      base::OnceClosure reply) {
+    auto pending_dial = base::MakeRefCounted<PendingDial>();
+    dial_queue->Post(
+        base::BindOnce(&PendingDial::Run, pending_dial, std::move(dial),
+                       base::SequencedTaskRunner::GetCurrentDefault(),
+                       std::move(reply)),
+        !address.address().IsLoopback() || address.port() != 53);
+    return pending_dial;
+  }
+
+  PendingDial() = default;
+  PendingDial(const PendingDial&) = delete;
+  PendingDial& operator=(const PendingDial&) = delete;
+
+  DialResult Take() {
+    base::AutoLock lock(lock_);
+    return std::move(result_);
+  }
+
+  void Abandon() {
+    DialResult result;
+    base::AutoLock lock(lock_);
+    abandoned_ = true;
+    result = std::move(result_);
+  }
+
+ private:
+  friend class base::RefCountedThreadSafe<PendingDial>;
+  ~PendingDial() = default;
+
+  void Run(DialCallback dial,
+           scoped_refptr<base::SequencedTaskRunner> reply_task_runner,
+           base::OnceClosure reply) {
+    {
+      base::AutoLock lock(lock_);
+      if (abandoned_) {
+        return;
+      }
+    }
+    DialResult result;
+    {
+      base::ScopedBlockingCall scoped_blocking_call(
+          FROM_HERE, base::BlockingType::WILL_BLOCK);
+      result = std::move(dial).Run();
+    }
+    {
+      base::AutoLock lock(lock_);
+      if (abandoned_) {
+        return;
+      }
+      result_ = std::move(result);
+    }
+    reply_task_runner->PostTask(FROM_HERE, std::move(reply));
+  }
+
+  base::Lock lock_;
+  bool abandoned_ GUARDED_BY(lock_) = false;
+  DialResult result_ GUARDED_BY(lock_);
+};
+
+DialResult DialTCP(CustomClientSocketFactory::DialerCallback dialer,
+                   const IPEndPoint& address) {
+  DialResult result;
+  result.SetDialerResult(
+      dialer.Run(address.ToStringWithoutPort(), address.port()));
+  return result;
+}
+
+DialResult DialUDP(CustomClientSocketFactory::UdpDialerCallback dialer,
+                   const IPEndPoint& address) {
+  DialResult result;
+  char local_address[kLocalAddressBufferSize] = {0};
+  result.SetDialerResult(dialer.Run(address.ToStringWithoutPort(),
+                                    address.port(), local_address,
+                                    &result.local_port, &result.on_close));
+  result.local_address = local_address;
+  return result;
+}
 
 // A DatagramClientSocket that wraps a socket fd returned by a custom dialer.
 // This socket can be:
@@ -61,13 +282,19 @@ constexpr size_t kLocalAddressBufferSize = 46;
 // The socket is NOT connected by Chromium - the dialer is expected to return
 // a ready-to-use socket. For AF_UNIX SOCK_STREAM, length-prefix framing is used
 // to preserve datagram boundaries.
-class ConnectedDatagramClientSocket : public DatagramClientSocket {
+class ConnectedDatagramClientSocket
+    : public DatagramClientSocket,
+      public CustomClientSocketFactory::PendingConnect {
  public:
   ConnectedDatagramClientSocket(
       CustomClientSocketFactory::UdpDialerCallback dialer,
+      base::WeakPtr<CustomClientSocketFactory> factory,
+      scoped_refptr<CustomClientSocketFactory::DialQueue> dial_queue,
       net::NetLog* net_log,
       const NetLogSource& source)
       : dialer_(std::move(dialer)),
+        factory_(std::move(factory)),
+        dial_queue_(std::move(dial_queue)),
         net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)),
         read_length_buffer_(base::MakeRefCounted<IOBufferWithSize>(2)),
         write_length_buffer_(base::MakeRefCounted<IOBufferWithSize>(2)) {
@@ -92,7 +319,7 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
 
   int ConnectAsync(const IPEndPoint& address,
                    CompletionOnceCallback callback) override {
-    return DoConnect(address);
+    return DoConnectAsync(address, std::move(callback));
   }
 
   int ConnectUsingNetworkAsync(handles::NetworkHandle network,
@@ -101,13 +328,13 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     if (network != handles::kInvalidNetworkHandle) {
       return ERR_NOT_IMPLEMENTED;
     }
-    return DoConnect(address);
+    return DoConnectAsync(address, std::move(callback));
   }
 
   int ConnectUsingDefaultNetworkAsync(
       const IPEndPoint& address,
       CompletionOnceCallback callback) override {
-    return DoConnect(address);
+    return DoConnectAsync(address, std::move(callback));
   }
 
   handles::NetworkHandle GetBoundNetwork() const override {
@@ -166,6 +393,8 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   }
 
   void Close() override {
+    AbandonPendingConnect();
+    connect_callback_.Reset();
     connected_ = false;
     socket_.reset();
     if (on_close_) {
@@ -223,25 +452,61 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     WRITE_STATE_WRITE_PAYLOAD_COMPLETE,
   };
 
+  void CancelPendingConnect() override {
+    AbandonPendingConnect();
+    CompletionOnceCallback callback = std::move(connect_callback_);
+  }
+
   int DoConnect(const IPEndPoint& address) {
     if (connected_) {
       return OK;
     }
+    return AdoptDialResult(DialUDP(dialer_, address), address);
+  }
 
-    const std::string address_string = address.ToStringWithoutPort();
-    const uint16_t port = address.port();
+  int DoConnectAsync(const IPEndPoint& address,
+                     CompletionOnceCallback callback) {
+    if (connected_) {
+      return OK;
+    }
+    connect_callback_ = std::move(callback);
+    pending_dial_ = PendingDial::Start(
+        dial_queue_.get(), address, base::BindOnce(&DialUDP, dialer_, address),
+        base::BindOnce(&ConnectedDatagramClientSocket::OnDialComplete,
+                       weak_factory_.GetWeakPtr(), address));
+    if (factory_) {
+      factory_->AddPendingConnect(this);
+    }
+    return ERR_IO_PENDING;
+  }
 
-    char local_addr_buf[kLocalAddressBufferSize] = {0};
-    uint16_t local_port = 0;
+  void OnDialComplete(const IPEndPoint& address) {
+    if (factory_) {
+      factory_->RemovePendingConnect(this);
+    }
+    DialResult result = pending_dial_->Take();
+    pending_dial_ = nullptr;
+    std::move(connect_callback_)
+        .Run(AdoptDialResult(std::move(result), address));
+  }
 
-    intptr_t result = dialer_.Run(address_string, port, local_addr_buf,
-                                  &local_port, &on_close_);
-    if (result < 0) {
-      Close();
-      return static_cast<int>(result);
+  void AbandonPendingConnect() {
+    if (factory_) {
+      factory_->RemovePendingConnect(this);
+    }
+    if (pending_dial_) {
+      pending_dial_->Abandon();
+      pending_dial_ = nullptr;
+    }
+    weak_factory_.InvalidateWeakPtrs();
+  }
+
+  int AdoptDialResult(DialResult result, const IPEndPoint& address) {
+    if (result.rv != OK) {
+      return result.rv;
     }
 
-    SocketDescriptor socket_fd = static_cast<SocketDescriptor>(result);
+    SocketDescriptor socket_fd = result.TakeSocket();
 
 #if BUILDFLAG(IS_WIN)
     WSAPROTOCOL_INFOW protocol_info;
@@ -273,20 +538,22 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
     int rv = socket_->AdoptUnconnectedSocket(socket_fd);
 #endif
     if (rv != OK) {
-      Close();
+      socket_.reset();
       return rv;
     }
 
-    if (local_addr_buf[0] != '\0') {
+    local_address_ = IPEndPoint();
+    if (!result.local_address.empty()) {
       IPAddress ip;
-      if (ip.AssignFromIPLiteral(local_addr_buf)) {
-        local_address_ = IPEndPoint(ip, local_port);
+      if (ip.AssignFromIPLiteral(result.local_address)) {
+        local_address_ = IPEndPoint(ip, result.local_port);
       }
     }
     if (!local_address_.address().IsValid()) {
       local_address_ = IPEndPoint(address.address(), 0);
     }
 
+    on_close_ = std::move(result.on_close);
     peer_address_ = address;
     connected_ = true;
     return OK;
@@ -548,6 +815,10 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   }
 
   CustomClientSocketFactory::UdpDialerCallback dialer_;
+  base::WeakPtr<CustomClientSocketFactory> factory_;
+  scoped_refptr<CustomClientSocketFactory::DialQueue> dial_queue_;
+  scoped_refptr<PendingDial> pending_dial_;
+  CompletionOnceCallback connect_callback_;
   base::OnceClosure on_close_;
   NetLogWithSource net_log_;
 
@@ -581,60 +852,235 @@ class ConnectedDatagramClientSocket : public DatagramClientSocket {
   MutableNetworkTrafficAnnotationTag write_traffic_annotation_;
 
   ReadMultipleEmulator read_multiple_emulator_{this};
+
+  base::WeakPtrFactory<ConnectedDatagramClientSocket> weak_factory_{this};
 };
 
-// A TransportClientSocket that immediately fails with a predetermined error.
-class FailingTransportClientSocket : public TransportClientSocket {
+class CustomTransportClientSocket
+    : public TransportClientSocket,
+      public CustomClientSocketFactory::PendingConnect {
  public:
-  explicit FailingTransportClientSocket(int error_code,
-                                        const AddressList& addresses,
-                                        class NetLog* net_log,
-                                        const NetLogSource& source)
-      : error_code_(error_code),
+  CustomTransportClientSocket(
+      CustomClientSocketFactory::DialerCallback dialer,
+      base::WeakPtr<CustomClientSocketFactory> factory,
+      scoped_refptr<CustomClientSocketFactory::DialQueue> dial_queue,
+      const AddressList& addresses,
+      std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
+      class NetLog* net_log,
+      const NetLogSource& source)
+      : dialer_(std::move(dialer)),
+        factory_(std::move(factory)),
+        dial_queue_(std::move(dial_queue)),
         addresses_(addresses),
-        net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)) {}
+        net_log_(net_log),
+        source_(source),
+        unconnected_socket_(TCPSocket::Create(
+            std::move(socket_performance_watcher), net_log, source)) {}
 
-  ~FailingTransportClientSocket() override = default;
+  ~CustomTransportClientSocket() override { AbandonPendingConnect(); }
 
-  int Bind(const IPEndPoint& local_addr) override { return ERR_FAILED; }
-  bool SetNoDelay(bool no_delay) override { return false; }
-  bool SetKeepAlive(bool enable, int delay_secs) override { return false; }
-  int Connect(CompletionOnceCallback callback) override { return error_code_; }
-  void Disconnect() override {}
-  bool IsConnected() const override { return false; }
-  bool IsConnectedAndIdle() const override { return false; }
+  void CancelPendingConnect() override {
+    AbandonPendingConnect();
+    CompletionOnceCallback callback = std::move(connect_callback_);
+  }
+
+  int Bind(const IPEndPoint& local_addr) override {
+    return ERR_NOT_IMPLEMENTED;
+  }
+
+  bool SetNoDelay(bool no_delay) override {
+    return socket_ && socket_->SetNoDelay(no_delay);
+  }
+
+  bool SetKeepAlive(bool enable, int delay_secs) override {
+    return socket_ && socket_->SetKeepAlive(enable, delay_secs);
+  }
+
+  int Connect(CompletionOnceCallback callback) override {
+    if (socket_) {
+      return OK;
+    }
+    if (addresses_.empty()) {
+      return ERR_NAME_NOT_RESOLVED;
+    }
+    connect_callback_ = std::move(callback);
+    address_index_ = 0;
+    DialCurrentAddress();
+    if (factory_) {
+      factory_->AddPendingConnect(this);
+    }
+    return ERR_IO_PENDING;
+  }
+
+  void Disconnect() override {
+    AbandonPendingConnect();
+    connect_callback_.Reset();
+    if (socket_) {
+      socket_.reset();
+      unconnected_socket_ = TCPSocket::Create(nullptr, net_log_, source_);
+      unconnected_socket_->ApplySocketTag(socket_tag_);
+    }
+  }
+
+  bool IsConnected() const override {
+    return socket_ && socket_->IsConnected();
+  }
+
+  bool IsConnectedAndIdle() const override {
+    return socket_ && socket_->IsConnectedAndIdle();
+  }
+
   int GetPeerAddress(IPEndPoint* address) const override {
-    return ERR_SOCKET_NOT_CONNECTED;
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->GetPeerAddress(address);
   }
+
   int GetLocalAddress(IPEndPoint* address) const override {
-    return ERR_SOCKET_NOT_CONNECTED;
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->GetLocalAddress(address);
   }
-  const NetLogWithSource& NetLog() const override { return net_log_; }
-  bool WasEverUsed() const override { return false; }
+
+  const NetLogWithSource& NetLog() const override {
+    if (socket_) {
+      return socket_->NetLog();
+    }
+    return unconnected_socket_->net_log();
+  }
+
+  bool WasEverUsed() const override {
+    return socket_ && socket_->WasEverUsed();
+  }
+
   NextProto GetNegotiatedProtocol() const override {
     return NextProto::kProtoUnknown;
   }
+
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
-  int64_t GetTotalReceivedBytes() const override { return 0; }
-  void ApplySocketTag(const SocketTag& tag) override {}
+
+  int64_t GetTotalReceivedBytes() const override {
+    return socket_ ? socket_->GetTotalReceivedBytes() : 0;
+  }
+
+  void ApplySocketTag(const SocketTag& tag) override {
+    socket_tag_ = tag;
+    if (socket_) {
+      socket_->ApplySocketTag(tag);
+    } else {
+      unconnected_socket_->ApplySocketTag(tag);
+    }
+  }
+
   int Read(IOBuffer* buf,
            int buf_len,
            CompletionOnceCallback callback) override {
-    return error_code_;
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->Read(buf, buf_len, std::move(callback));
   }
+
+  int ReadIfReady(IOBuffer* buf,
+                  int buf_len,
+                  CompletionOnceCallback callback) override {
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->ReadIfReady(buf, buf_len, std::move(callback));
+  }
+
+  int CancelReadIfReady() override {
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->CancelReadIfReady();
+  }
+
   int Write(IOBuffer* buf,
             int buf_len,
             CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override {
-    return error_code_;
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->Write(buf, buf_len, std::move(callback),
+                          traffic_annotation);
   }
-  int SetReceiveBufferSize(int32_t size) override { return ERR_FAILED; }
-  int SetSendBufferSize(int32_t size) override { return ERR_FAILED; }
+
+  int SetReceiveBufferSize(int32_t size) override {
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->SetReceiveBufferSize(size);
+  }
+
+  int SetSendBufferSize(int32_t size) override {
+    if (!socket_) {
+      return ERR_SOCKET_NOT_CONNECTED;
+    }
+    return socket_->SetSendBufferSize(size);
+  }
 
  private:
-  const int error_code_;
+  void DialCurrentAddress() {
+    const IPEndPoint& address = addresses_[address_index_];
+    pending_dial_ = PendingDial::Start(
+        dial_queue_.get(), address, base::BindOnce(&DialTCP, dialer_, address),
+        base::BindOnce(&CustomTransportClientSocket::OnDialComplete,
+                       weak_factory_.GetWeakPtr()));
+  }
+
+  void OnDialComplete() {
+    DialResult result = pending_dial_->Take();
+    pending_dial_ = nullptr;
+    int rv = result.rv;
+    if (rv == OK) {
+      const IPEndPoint& endpoint = addresses_[address_index_];
+      rv = unconnected_socket_->AdoptConnectedSocket(result.TakeSocket(),
+                                                     endpoint);
+      if (rv == OK) {
+        socket_ = std::make_unique<TCPClientSocket>(
+            std::move(unconnected_socket_), endpoint);
+      }
+    }
+    if (rv != OK && ++address_index_ < addresses_.size()) {
+      DialCurrentAddress();
+      return;
+    }
+    if (factory_) {
+      factory_->RemovePendingConnect(this);
+    }
+    std::move(connect_callback_).Run(rv);
+  }
+
+  void AbandonPendingConnect() {
+    if (factory_) {
+      factory_->RemovePendingConnect(this);
+    }
+    if (pending_dial_) {
+      pending_dial_->Abandon();
+      pending_dial_ = nullptr;
+    }
+    weak_factory_.InvalidateWeakPtrs();
+  }
+
+  const CustomClientSocketFactory::DialerCallback dialer_;
+  const base::WeakPtr<CustomClientSocketFactory> factory_;
+  const scoped_refptr<CustomClientSocketFactory::DialQueue> dial_queue_;
   const AddressList addresses_;
-  NetLogWithSource net_log_;
+  const raw_ptr<class NetLog> net_log_;
+  const NetLogSource source_;
+  SocketTag socket_tag_;
+  std::unique_ptr<TCPSocket> unconnected_socket_;
+  std::unique_ptr<TCPClientSocket> socket_;
+  scoped_refptr<PendingDial> pending_dial_;
+  CompletionOnceCallback connect_callback_;
+  size_t address_index_ = 0;
+
+  base::WeakPtrFactory<CustomTransportClientSocket> weak_factory_{this};
 };
 
 }  // namespace
@@ -642,11 +1088,28 @@ class FailingTransportClientSocket : public TransportClientSocket {
 CustomClientSocketFactory::CustomClientSocketFactory(
     DialerCallback tcp_dialer,
     UdpDialerCallback udp_dialer)
-    : tcp_dialer_(std::move(tcp_dialer)), udp_dialer_(std::move(udp_dialer)) {
+    : tcp_dialer_(std::move(tcp_dialer)),
+      udp_dialer_(std::move(udp_dialer)),
+      dial_queue_(base::MakeRefCounted<DialQueue>()) {
   DCHECK(tcp_dialer_ || udp_dialer_);
 }
 
-CustomClientSocketFactory::~CustomClientSocketFactory() = default;
+CustomClientSocketFactory::~CustomClientSocketFactory() {
+  while (!pending_connects_.empty()) {
+    (*pending_connects_.begin())->CancelPendingConnect();
+  }
+  dial_queue_->WaitForIdle();
+}
+
+void CustomClientSocketFactory::AddPendingConnect(
+    PendingConnect* pending_connect) {
+  pending_connects_.insert(pending_connect);
+}
+
+void CustomClientSocketFactory::RemovePendingConnect(
+    PendingConnect* pending_connect) {
+  pending_connects_.erase(pending_connect);
+}
 
 std::unique_ptr<DatagramClientSocket>
 CustomClientSocketFactory::CreateDatagramClientSocket(
@@ -655,8 +1118,8 @@ CustomClientSocketFactory::CreateDatagramClientSocket(
     NetLog* net_log,
     const NetLogSource& source) {
   if (udp_dialer_) {
-    return std::make_unique<ConnectedDatagramClientSocket>(udp_dialer_, net_log,
-                                                           source);
+    return std::make_unique<ConnectedDatagramClientSocket>(
+        udp_dialer_, weak_factory_.GetWeakPtr(), dial_queue_, net_log, source);
   }
   return ClientSocketFactory::GetDefaultFactory()->CreateDatagramClientSocket(
       bind_type, target_network, net_log, source);
@@ -677,26 +1140,9 @@ CustomClientSocketFactory::CreateTransportClientSocket(
             network_quality_estimator, net_log, source);
   }
 
-  int last_error = ERR_NAME_NOT_RESOLVED;
-  for (const auto& endpoint : addresses) {
-    std::string address_string = endpoint.ToStringWithoutPort();
-    uint16_t port = endpoint.port();
-    intptr_t result = tcp_dialer_.Run(address_string, port);
-    if (result >= 0) {
-      SocketDescriptor socket_fd = static_cast<SocketDescriptor>(result);
-      auto tcp_socket = TCPSocket::Create(std::move(socket_performance_watcher),
-                                          net_log, source);
-      int adopt_result = tcp_socket->AdoptConnectedSocket(socket_fd, endpoint);
-      if (adopt_result != OK) {
-        return std::make_unique<FailingTransportClientSocket>(
-            adopt_result, addresses, net_log, source);
-      }
-      return std::make_unique<TCPClientSocket>(std::move(tcp_socket), endpoint);
-    }
-    last_error = static_cast<int>(result);
-  }
-  return std::make_unique<FailingTransportClientSocket>(last_error, addresses,
-                                                        net_log, source);
+  return std::make_unique<CustomTransportClientSocket>(
+      tcp_dialer_, weak_factory_.GetWeakPtr(), dial_queue_, addresses,
+      std::move(socket_performance_watcher), net_log, source);
 }
 
 std::unique_ptr<SSLClientSocket>
